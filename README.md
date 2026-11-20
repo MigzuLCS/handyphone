@@ -3,7 +3,7 @@
 **Migzu's HandyPhone is a Fabric mod for Minecraft 26.3 that adds a working smartphone to multiplayer servers:** texting, group chats,
 photos, maps with directions and voice calls (as a Simple Voice Chat addon). Press **U** and the phone comes out in your hand, no item needed.
 
-**Download:** on Modrinth (link coming soon). **Bugs and ideas:** open an [issue](../../issues).
+**Download:** [modrinth.com/mod/handyphone](https://modrinth.com/mod/handyphone). **Bugs and ideas:** open an [issue](../../issues).
 
 ## Features
 - **Messages and groups:** every player gets a phone number; text anyone on the server, create group chats, save contacts, get notifications,
