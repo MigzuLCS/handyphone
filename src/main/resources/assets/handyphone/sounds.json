@@ -1,0 +1,742 @@
+{
+	"device.pull": {
+		"subtitle": "subtitles.handyphone.device_pull",
+		"sounds": [
+			"handyphone:device/pull_1",
+			"handyphone:device/pull_2",
+			"handyphone:device/pull_3"
+		]
+	},
+	"device.flip_front": {
+		"subtitle": "subtitles.handyphone.device_flip_front",
+		"sounds": [
+			"handyphone:device/flip_front_1",
+			"handyphone:device/flip_front_2",
+			"handyphone:device/flip_front_3"
+		]
+	},
+	"device.put_away": {
+		"subtitle": "subtitles.handyphone.device_put_away",
+		"sounds": [
+			"handyphone:device/put_away_1",
+			"handyphone:device/put_away_2",
+			"handyphone:device/put_away_3"
+		]
+	},
+	"device.expand": {
+		"subtitle": "subtitles.handyphone.device_expand",
+		"sounds": [
+			"handyphone:device/expand"
+		]
+	},
+	"device.collapse": {
+		"subtitle": "subtitles.handyphone.device_collapse",
+		"sounds": [
+			"handyphone:device/collapse"
+		]
+	},
+	"device.home_key_down": {
+		"subtitle": "subtitles.handyphone.device_home_key_down",
+		"sounds": [
+			"handyphone:device/home_key_down"
+		]
+	},
+	"device.home_key_up": {
+		"subtitle": "subtitles.handyphone.device_home_key_up",
+		"sounds": [
+			"handyphone:device/home_key_up"
+		]
+	},
+	"device.screen_on": {
+		"subtitle": "subtitles.handyphone.device_screen_on",
+		"sounds": [
+			"handyphone:device/screen_on"
+		]
+	},
+	"device.screen_off": {
+		"subtitle": "subtitles.handyphone.device_screen_off",
+		"sounds": [
+			"handyphone:device/screen_off"
+		]
+	},
+	"retro.icon_tap": {
+		"subtitle": "subtitles.handyphone.icon_tap",
+		"sounds": [
+			"handyphone:retro/icon_tap_1",
+			"handyphone:retro/icon_tap_2",
+			"handyphone:retro/icon_tap_3"
+		]
+	},
+	"retro.app_open": {
+		"subtitle": "subtitles.handyphone.app_open",
+		"sounds": [
+			"handyphone:retro/app_open"
+		]
+	},
+	"retro.app_close": {
+		"subtitle": "subtitles.handyphone.app_close",
+		"sounds": [
+			"handyphone:retro/app_close"
+		]
+	},
+	"retro.button": {
+		"subtitle": "subtitles.handyphone.button",
+		"sounds": [
+			"handyphone:retro/button_1",
+			"handyphone:retro/button_2",
+			"handyphone:retro/button_3"
+		]
+	},
+	"retro.list_item": {
+		"subtitle": "subtitles.handyphone.list_item",
+		"sounds": [
+			"handyphone:retro/list_item"
+		]
+	},
+	"retro.select": {
+		"subtitle": "subtitles.handyphone.select",
+		"sounds": [
+			"handyphone:retro/select"
+		]
+	},
+	"retro.theme_change": {
+		"subtitle": "subtitles.handyphone.theme_change",
+		"sounds": [
+			"handyphone:retro/theme_change"
+		]
+	},
+	"retro.field_focus": {
+		"subtitle": "subtitles.handyphone.field_focus",
+		"sounds": [
+			"handyphone:retro/field_focus"
+		]
+	},
+	"retro.key": {
+		"subtitle": "subtitles.handyphone.key",
+		"sounds": [
+			"handyphone:retro/key_1",
+			"handyphone:retro/key_2",
+			"handyphone:retro/key_3",
+			"handyphone:retro/key_4",
+			"handyphone:retro/key_5"
+		]
+	},
+	"retro.key_delete": {
+		"subtitle": "subtitles.handyphone.key_delete",
+		"sounds": [
+			"handyphone:retro/key_delete"
+		]
+	},
+	"retro.key_enter": {
+		"subtitle": "subtitles.handyphone.key_enter",
+		"sounds": [
+			"handyphone:retro/key_enter"
+		]
+	},
+	"retro.scroll_tick": {
+		"subtitle": "subtitles.handyphone.scroll_tick",
+		"sounds": [
+			"handyphone:retro/scroll_tick"
+		]
+	},
+	"retro.message_sent": {
+		"subtitle": "subtitles.handyphone.message_sent",
+		"sounds": [
+			"handyphone:retro/message_sent"
+		]
+	},
+	"retro.message_received": {
+		"subtitle": "subtitles.handyphone.message_received",
+		"sounds": [
+			"handyphone:retro/message_received"
+		]
+	},
+	"retro.notification": {
+		"subtitle": "subtitles.handyphone.notification",
+		"sounds": [
+			"handyphone:retro/notification"
+		]
+	},
+	"retro.notification_group": {
+		"subtitle": "subtitles.handyphone.notification_group",
+		"sounds": [
+			"handyphone:retro/notification_group"
+		]
+	},
+	"retro.ringtone": {
+		"subtitle": "subtitles.handyphone.ringtone",
+		"sounds": [
+			"handyphone:retro/ringtone"
+		]
+	},
+	"retro.call_dial": {
+		"subtitle": "subtitles.handyphone.call_dial",
+		"sounds": [
+			"handyphone:retro/call_dial"
+		]
+	},
+	"retro.call_connect": {
+		"subtitle": "subtitles.handyphone.call_connect",
+		"sounds": [
+			"handyphone:retro/call_connect"
+		]
+	},
+	"retro.call_end": {
+		"subtitle": "subtitles.handyphone.call_end",
+		"sounds": [
+			"handyphone:retro/call_end"
+		]
+	},
+	"retro.call_busy": {
+		"subtitle": "subtitles.handyphone.call_busy",
+		"sounds": [
+			"handyphone:retro/call_busy"
+		]
+	},
+	"retro.call_join": {
+		"subtitle": "subtitles.handyphone.call_join",
+		"sounds": [
+			"handyphone:retro/call_join"
+		]
+	},
+	"retro.call_leave": {
+		"subtitle": "subtitles.handyphone.call_leave",
+		"sounds": [
+			"handyphone:retro/call_leave"
+		]
+	},
+	"retro.error": {
+		"subtitle": "subtitles.handyphone.error",
+		"sounds": [
+			"handyphone:retro/error"
+		]
+	},
+	"retro.contact_saved": {
+		"subtitle": "subtitles.handyphone.contact_saved",
+		"sounds": [
+			"handyphone:retro/contact_saved"
+		]
+	},
+	"retro.group_created": {
+		"subtitle": "subtitles.handyphone.group_created",
+		"sounds": [
+			"handyphone:retro/group_created"
+		]
+	},
+	"retro.contact_removed": {
+		"subtitle": "subtitles.handyphone.contact_removed",
+		"sounds": [
+			"handyphone:retro/contact_removed"
+		]
+	},
+	"aero.icon_tap": {
+		"subtitle": "subtitles.handyphone.icon_tap",
+		"sounds": [
+			"handyphone:aero/icon_tap_1",
+			"handyphone:aero/icon_tap_2",
+			"handyphone:aero/icon_tap_3"
+		]
+	},
+	"aero.app_open": {
+		"subtitle": "subtitles.handyphone.app_open",
+		"sounds": [
+			"handyphone:aero/app_open"
+		]
+	},
+	"aero.app_close": {
+		"subtitle": "subtitles.handyphone.app_close",
+		"sounds": [
+			"handyphone:aero/app_close"
+		]
+	},
+	"aero.button": {
+		"subtitle": "subtitles.handyphone.button",
+		"sounds": [
+			"handyphone:aero/button_1",
+			"handyphone:aero/button_2",
+			"handyphone:aero/button_3"
+		]
+	},
+	"aero.list_item": {
+		"subtitle": "subtitles.handyphone.list_item",
+		"sounds": [
+			"handyphone:aero/list_item"
+		]
+	},
+	"aero.select": {
+		"subtitle": "subtitles.handyphone.select",
+		"sounds": [
+			"handyphone:aero/select"
+		]
+	},
+	"aero.theme_change": {
+		"subtitle": "subtitles.handyphone.theme_change",
+		"sounds": [
+			"handyphone:aero/theme_change"
+		]
+	},
+	"aero.field_focus": {
+		"subtitle": "subtitles.handyphone.field_focus",
+		"sounds": [
+			"handyphone:aero/field_focus"
+		]
+	},
+	"aero.key": {
+		"subtitle": "subtitles.handyphone.key",
+		"sounds": [
+			"handyphone:aero/key_1",
+			"handyphone:aero/key_2",
+			"handyphone:aero/key_3",
+			"handyphone:aero/key_4",
+			"handyphone:aero/key_5"
+		]
+	},
+	"aero.key_delete": {
+		"subtitle": "subtitles.handyphone.key_delete",
+		"sounds": [
+			"handyphone:aero/key_delete"
+		]
+	},
+	"aero.key_enter": {
+		"subtitle": "subtitles.handyphone.key_enter",
+		"sounds": [
+			"handyphone:aero/key_enter"
+		]
+	},
+	"aero.scroll_tick": {
+		"subtitle": "subtitles.handyphone.scroll_tick",
+		"sounds": [
+			"handyphone:aero/scroll_tick"
+		]
+	},
+	"aero.message_sent": {
+		"subtitle": "subtitles.handyphone.message_sent",
+		"sounds": [
+			"handyphone:aero/message_sent"
+		]
+	},
+	"aero.message_received": {
+		"subtitle": "subtitles.handyphone.message_received",
+		"sounds": [
+			"handyphone:aero/message_received"
+		]
+	},
+	"aero.notification": {
+		"subtitle": "subtitles.handyphone.notification",
+		"sounds": [
+			"handyphone:aero/notification"
+		]
+	},
+	"aero.notification_group": {
+		"subtitle": "subtitles.handyphone.notification_group",
+		"sounds": [
+			"handyphone:aero/notification_group"
+		]
+	},
+	"aero.ringtone": {
+		"subtitle": "subtitles.handyphone.ringtone",
+		"sounds": [
+			"handyphone:aero/ringtone"
+		]
+	},
+	"aero.call_dial": {
+		"subtitle": "subtitles.handyphone.call_dial",
+		"sounds": [
+			"handyphone:aero/call_dial"
+		]
+	},
+	"aero.call_connect": {
+		"subtitle": "subtitles.handyphone.call_connect",
+		"sounds": [
+			"handyphone:aero/call_connect"
+		]
+	},
+	"aero.call_end": {
+		"subtitle": "subtitles.handyphone.call_end",
+		"sounds": [
+			"handyphone:aero/call_end"
+		]
+	},
+	"aero.call_busy": {
+		"subtitle": "subtitles.handyphone.call_busy",
+		"sounds": [
+			"handyphone:aero/call_busy"
+		]
+	},
+	"aero.call_join": {
+		"subtitle": "subtitles.handyphone.call_join",
+		"sounds": [
+			"handyphone:aero/call_join"
+		]
+	},
+	"aero.call_leave": {
+		"subtitle": "subtitles.handyphone.call_leave",
+		"sounds": [
+			"handyphone:aero/call_leave"
+		]
+	},
+	"aero.error": {
+		"subtitle": "subtitles.handyphone.error",
+		"sounds": [
+			"handyphone:aero/error"
+		]
+	},
+	"aero.contact_saved": {
+		"subtitle": "subtitles.handyphone.contact_saved",
+		"sounds": [
+			"handyphone:aero/contact_saved"
+		]
+	},
+	"aero.group_created": {
+		"subtitle": "subtitles.handyphone.group_created",
+		"sounds": [
+			"handyphone:aero/group_created"
+		]
+	},
+	"aero.contact_removed": {
+		"subtitle": "subtitles.handyphone.contact_removed",
+		"sounds": [
+			"handyphone:aero/contact_removed"
+		]
+	},
+	"flat.icon_tap": {
+		"subtitle": "subtitles.handyphone.icon_tap",
+		"sounds": [
+			"handyphone:flat/icon_tap_1",
+			"handyphone:flat/icon_tap_2",
+			"handyphone:flat/icon_tap_3"
+		]
+	},
+	"flat.app_open": {
+		"subtitle": "subtitles.handyphone.app_open",
+		"sounds": [
+			"handyphone:flat/app_open"
+		]
+	},
+	"flat.app_close": {
+		"subtitle": "subtitles.handyphone.app_close",
+		"sounds": [
+			"handyphone:flat/app_close"
+		]
+	},
+	"flat.button": {
+		"subtitle": "subtitles.handyphone.button",
+		"sounds": [
+			"handyphone:flat/button_1",
+			"handyphone:flat/button_2",
+			"handyphone:flat/button_3"
+		]
+	},
+	"flat.list_item": {
+		"subtitle": "subtitles.handyphone.list_item",
+		"sounds": [
+			"handyphone:flat/list_item"
+		]
+	},
+	"flat.select": {
+		"subtitle": "subtitles.handyphone.select",
+		"sounds": [
+			"handyphone:flat/select"
+		]
+	},
+	"flat.theme_change": {
+		"subtitle": "subtitles.handyphone.theme_change",
+		"sounds": [
+			"handyphone:flat/theme_change"
+		]
+	},
+	"flat.field_focus": {
+		"subtitle": "subtitles.handyphone.field_focus",
+		"sounds": [
+			"handyphone:flat/field_focus"
+		]
+	},
+	"flat.key": {
+		"subtitle": "subtitles.handyphone.key",
+		"sounds": [
+			"handyphone:flat/key_1",
+			"handyphone:flat/key_2",
+			"handyphone:flat/key_3",
+			"handyphone:flat/key_4",
+			"handyphone:flat/key_5"
+		]
+	},
+	"flat.key_delete": {
+		"subtitle": "subtitles.handyphone.key_delete",
+		"sounds": [
+			"handyphone:flat/key_delete"
+		]
+	},
+	"flat.key_enter": {
+		"subtitle": "subtitles.handyphone.key_enter",
+		"sounds": [
+			"handyphone:flat/key_enter"
+		]
+	},
+	"flat.scroll_tick": {
+		"subtitle": "subtitles.handyphone.scroll_tick",
+		"sounds": [
+			"handyphone:flat/scroll_tick"
+		]
+	},
+	"flat.message_sent": {
+		"subtitle": "subtitles.handyphone.message_sent",
+		"sounds": [
+			"handyphone:flat/message_sent"
+		]
+	},
+	"flat.message_received": {
+		"subtitle": "subtitles.handyphone.message_received",
+		"sounds": [
+			"handyphone:flat/message_received"
+		]
+	},
+	"flat.notification": {
+		"subtitle": "subtitles.handyphone.notification",
+		"sounds": [
+			"handyphone:flat/notification"
+		]
+	},
+	"flat.notification_group": {
+		"subtitle": "subtitles.handyphone.notification_group",
+		"sounds": [
+			"handyphone:flat/notification_group"
+		]
+	},
+	"flat.ringtone": {
+		"subtitle": "subtitles.handyphone.ringtone",
+		"sounds": [
+			"handyphone:flat/ringtone"
+		]
+	},
+	"flat.call_dial": {
+		"subtitle": "subtitles.handyphone.call_dial",
+		"sounds": [
+			"handyphone:flat/call_dial"
+		]
+	},
+	"flat.call_connect": {
+		"subtitle": "subtitles.handyphone.call_connect",
+		"sounds": [
+			"handyphone:flat/call_connect"
+		]
+	},
+	"flat.call_end": {
+		"subtitle": "subtitles.handyphone.call_end",
+		"sounds": [
+			"handyphone:flat/call_end"
+		]
+	},
+	"flat.call_busy": {
+		"subtitle": "subtitles.handyphone.call_busy",
+		"sounds": [
+			"handyphone:flat/call_busy"
+		]
+	},
+	"flat.call_join": {
+		"subtitle": "subtitles.handyphone.call_join",
+		"sounds": [
+			"handyphone:flat/call_join"
+		]
+	},
+	"flat.call_leave": {
+		"subtitle": "subtitles.handyphone.call_leave",
+		"sounds": [
+			"handyphone:flat/call_leave"
+		]
+	},
+	"flat.error": {
+		"subtitle": "subtitles.handyphone.error",
+		"sounds": [
+			"handyphone:flat/error"
+		]
+	},
+	"flat.contact_saved": {
+		"subtitle": "subtitles.handyphone.contact_saved",
+		"sounds": [
+			"handyphone:flat/contact_saved"
+		]
+	},
+	"flat.group_created": {
+		"subtitle": "subtitles.handyphone.group_created",
+		"sounds": [
+			"handyphone:flat/group_created"
+		]
+	},
+	"flat.contact_removed": {
+		"subtitle": "subtitles.handyphone.contact_removed",
+		"sounds": [
+			"handyphone:flat/contact_removed"
+		]
+	},
+	"modern.icon_tap": {
+		"subtitle": "subtitles.handyphone.icon_tap",
+		"sounds": [
+			"handyphone:modern/icon_tap_1",
+			"handyphone:modern/icon_tap_2",
+			"handyphone:modern/icon_tap_3"
+		]
+	},
+	"modern.app_open": {
+		"subtitle": "subtitles.handyphone.app_open",
+		"sounds": [
+			"handyphone:modern/app_open"
+		]
+	},
+	"modern.app_close": {
+		"subtitle": "subtitles.handyphone.app_close",
+		"sounds": [
+			"handyphone:modern/app_close"
+		]
+	},
+	"modern.button": {
+		"subtitle": "subtitles.handyphone.button",
+		"sounds": [
+			"handyphone:modern/button_1",
+			"handyphone:modern/button_2",
+			"handyphone:modern/button_3"
+		]
+	},
+	"modern.list_item": {
+		"subtitle": "subtitles.handyphone.list_item",
+		"sounds": [
+			"handyphone:modern/list_item"
+		]
+	},
+	"modern.select": {
+		"subtitle": "subtitles.handyphone.select",
+		"sounds": [
+			"handyphone:modern/select"
+		]
+	},
+	"modern.theme_change": {
+		"subtitle": "subtitles.handyphone.theme_change",
+		"sounds": [
+			"handyphone:modern/theme_change"
+		]
+	},
+	"modern.field_focus": {
+		"subtitle": "subtitles.handyphone.field_focus",
+		"sounds": [
+			"handyphone:modern/field_focus"
+		]
+	},
+	"modern.key": {
+		"subtitle": "subtitles.handyphone.key",
+		"sounds": [
+			"handyphone:modern/key_1",
+			"handyphone:modern/key_2",
+			"handyphone:modern/key_3",
+			"handyphone:modern/key_4",
+			"handyphone:modern/key_5"
+		]
+	},
+	"modern.key_delete": {
+		"subtitle": "subtitles.handyphone.key_delete",
+		"sounds": [
+			"handyphone:modern/key_delete"
+		]
+	},
+	"modern.key_enter": {
+		"subtitle": "subtitles.handyphone.key_enter",
+		"sounds": [
+			"handyphone:modern/key_enter"
+		]
+	},
+	"modern.scroll_tick": {
+		"subtitle": "subtitles.handyphone.scroll_tick",
+		"sounds": [
+			"handyphone:modern/scroll_tick"
+		]
+	},
+	"modern.message_sent": {
+		"subtitle": "subtitles.handyphone.message_sent",
+		"sounds": [
+			"handyphone:modern/message_sent"
+		]
+	},
+	"modern.message_received": {
+		"subtitle": "subtitles.handyphone.message_received",
+		"sounds": [
+			"handyphone:modern/message_received"
+		]
+	},
+	"modern.notification": {
+		"subtitle": "subtitles.handyphone.notification",
+		"sounds": [
+			"handyphone:modern/notification"
+		]
+	},
+	"modern.notification_group": {
+		"subtitle": "subtitles.handyphone.notification_group",
+		"sounds": [
+			"handyphone:modern/notification_group"
+		]
+	},
+	"modern.ringtone": {
+		"subtitle": "subtitles.handyphone.ringtone",
+		"sounds": [
+			"handyphone:modern/ringtone"
+		]
+	},
+	"modern.call_dial": {
+		"subtitle": "subtitles.handyphone.call_dial",
+		"sounds": [
+			"handyphone:modern/call_dial"
+		]
+	},
+	"modern.call_connect": {
+		"subtitle": "subtitles.handyphone.call_connect",
+		"sounds": [
+			"handyphone:modern/call_connect"
+		]
+	},
+	"modern.call_end": {
+		"subtitle": "subtitles.handyphone.call_end",
+		"sounds": [
+			"handyphone:modern/call_end"
+		]
+	},
+	"modern.call_busy": {
+		"subtitle": "subtitles.handyphone.call_busy",
+		"sounds": [
+			"handyphone:modern/call_busy"
+		]
+	},
+	"modern.call_join": {
+		"subtitle": "subtitles.handyphone.call_join",
+		"sounds": [
+			"handyphone:modern/call_join"
+		]
+	},
+	"modern.call_leave": {
+		"subtitle": "subtitles.handyphone.call_leave",
+		"sounds": [
+			"handyphone:modern/call_leave"
+		]
+	},
+	"modern.error": {
+		"subtitle": "subtitles.handyphone.error",
+		"sounds": [
+			"handyphone:modern/error"
+		]
+	},
+	"modern.contact_saved": {
+		"subtitle": "subtitles.handyphone.contact_saved",
+		"sounds": [
+			"handyphone:modern/contact_saved"
+		]
+	},
+	"modern.group_created": {
+		"subtitle": "subtitles.handyphone.group_created",
+		"sounds": [
+			"handyphone:modern/group_created"
+		]
+	},
+	"modern.contact_removed": {
+		"subtitle": "subtitles.handyphone.contact_removed",
+		"sounds": [
+			"handyphone:modern/contact_removed"
+		]
+	}
+}

@@ -22,7 +22,13 @@ photos, maps with directions and voice calls (as a Simple Voice Chat addon). Pre
 Minecraft 26.3, Fabric Loader and Fabric API, on **both client and server**. Optional: Simple Voice Chat (calls) and squaremap (map terrain).
 Works with Sodium and Iris.
 
-## License
-All Rights Reserved, see [LICENSE](LICENSE). The source code is not public.
+## Translations
+Spanish, French, German and Russian were translated with AI and still need native speakers. Found a mistake? See
+[TRANSLATING.md](TRANSLATING.md): an issue is enough, no coding needed.
+
+## Source code
+The source of each release is here to read: to check what the mod does on your server, learn from it, report bugs or make content that
+works with it. **This is not open source.** The code, assets and name are All Rights Reserved, see [LICENSE](LICENSE): forks, ports,
+re-uploads and mods built from this code are not allowed and will be taken down. Each release is one commit tagged with its version.
 
 *Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.*

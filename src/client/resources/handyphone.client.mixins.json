@@ -1,0 +1,8 @@
+{
+	"required": true,
+	"package": "dev.migzu.handyphone.client.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"client": ["FirstPersonHandsMixin", "GameRendererMixin", "HudMixin", "MinecraftMixin"],
+	"injectors": { "defaultRequire": 1 },
+	"overwrites": { "requireAnnotations": true }
+}

@@ -1,0 +1,383 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	id 'maven-publish'
+}
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// Add repositories to retrieve artifacts from in here.
+	// You should only use this when depending on other mods because
+	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
+	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
+	// for more information about repositories.
+	exclusiveContent {
+		forRepository { maven { url = "https://api.modrinth.com/maven" } }
+		filter { includeGroup "maven.modrinth" }
+	}
+	// API do squaremap (só para compilar; o mod é opcional em tempo de execução).
+	exclusiveContent {
+		forRepository { mavenCentral() }
+		filter { includeGroup "xyz.jpenilla" }
+	}
+	// API do Simple Voice Chat (só para compilar; o mod é opcional em tempo de execução).
+	exclusiveContent {
+		forRepository { maven { url = "https://maven.maxhenkel.de/repository/public" } }
+		filter { includeGroup "de.maxhenkel.voicechat" }
+	}
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	runs {
+		// Servidor de teste em pasta própria (não briga com o cliente) e um segundo cliente "Bia" para ter com quem ligar:
+		// ./gradlew runServer -Pvoice e ./gradlew runClient2 -Pvoice (o primeiro cliente é o runClient).
+		server {
+			runDir "run-server"
+		}
+		client2 {
+			inherit client
+			name = "Minecraft Client 2"
+			runDir "run-client2"
+			programArgs "--username", "Bia"
+			ideConfigGenerated false
+		}
+	}
+
+	mods {
+		"handyphone" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+// Teste automatizado dentro do jogo: ./gradlew runClientGameTest
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "handyphone-test"
+		enableGameTests = false
+		enableClientGameTests = true
+		eula = true
+	}
+}
+
+dependencies {
+	// To change the versions see the gradle.properties file
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Fabric API. This is technically optional, but you probably want it anyway.
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// squaremap desenha o terreno do app Mapa. Dependência OPCIONAL: só a API entra na compilação, e o mod
+	// não vai no jar. Para testar com ele: ./gradlew runServer -Pmap (ou runClientGameTest -Pmap).
+	compileOnly "xyz.jpenilla:squaremap-api:${project.squaremap_api_version}"
+	if (project.hasProperty("map")) {
+		localRuntime "maven.modrinth:squaremap:${project.squaremap_version}"
+	}
+
+	// Simple Voice Chat leva a voz das ligações. Dependência OPCIONAL: só a API entra na compilação, e o mod não
+	// vai no jar. Para testar com ele: ./gradlew runServer -Pvoice (ou runClient -Pvoice, runClientGameTest -Pvoice).
+	compileOnly "de.maxhenkel.voicechat:voicechat-api:${project.voicechat_api_version}"
+	if (project.hasProperty("voice")) {
+		localRuntime "maven.modrinth:simple-voice-chat:${project.voicechat_version}"
+	}
+
+	// Só para testar compatibilidade com shaders: ./gradlew runClient -Pshaders (não entra no jar).
+	if (project.hasProperty("shaders")) {
+		localRuntime "maven.modrinth:sodium:mc26.3-0.9.2-fabric"
+		localRuntime "maven.modrinth:iris:1.11.7+26.3-fabric"
+	}
+}
+
+// Com -Pshaders, o teste automático liga o shader de build/shaderpacks (copiado com java.nio, que funciona com o cache de configuração).
+if (project.hasProperty("shaders")) {
+	def shaderSource = new File(projectDir, "build/shaderpacks")
+	def shaderRunDir = new File(projectDir, "build/run/clientGameTest")
+	tasks.matching { it.name == "runClientGameTest" }.configureEach {
+		doFirst {
+			def packs = new File(shaderRunDir, "shaderpacks")
+			def config = new File(shaderRunDir, "config")
+			packs.mkdirs()
+			config.mkdirs()
+			def files = shaderSource.listFiles() ?: new File[0]
+			files.each { f ->
+				if (f.name.endsWith(".zip")) {
+					java.nio.file.Files.copy(f.toPath(), new File(packs, f.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+				} else if (f.name == "iris.properties") {
+					java.nio.file.Files.copy(f.toPath(), new File(config, f.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+				}
+			}
+		}
+	}
+}
+
+// Medição de desempenho: ./gradlew runClientGameTest -Pperf roda SÓ o PhonePerfTest e o PhoneServerPerfTest (ver CLAUDE.md,
+// "Desempenho"), com a gravação do JFR ligada. Os resultados saem em build/perf/. Sem -Pperf nada disso existe.
+tasks.named("processGametestResources") {
+	inputs.property "perf", project.hasProperty("perf")
+	if (project.hasProperty("perf")) {
+		doLast {
+			def modJson = new File(destinationDir, "fabric.mod.json")
+			modJson.text = modJson.text.replaceAll(/(?s)"fabric-client-gametest": \[.*?\]/,
+				'"fabric-client-gametest": ["dev.migzu.handyphone.test.PhonePerfTest", "dev.migzu.handyphone.test.PhoneServerPerfTest"]')
+		}
+	}
+}
+if (project.hasProperty("perf")) {
+	tasks.matching { it.name == "runClientGameTest" }.configureEach {
+		def perfDir = layout.buildDirectory.dir("perf").get().asFile
+		doFirst {
+			perfDir.mkdirs()
+		}
+		systemProperty "handyphone.perf.dir", perfDir.absolutePath
+		jvmArgs "-XX:StartFlightRecording=filename=${perfDir.absolutePath}/client.jfr,settings=profile,dumponexit=true"
+	}
+}
+
+// Gravação das cenas da página do mod (vídeos curtos em primeira pessoa): ./gradlew runClientGameTest -Pshowcase -Pshaders -Pmap -Pvoice
+// roda SÓ o ShowcaseTest (que tira uma captura por tick em build/showcase/<cena>/) e liga o modo de gravação (propriedade handyphone.showcase,
+// que no mod só troca o relógio do celular por um relógio virtual e não muda nada para o jogador). O mod de teste ganha, só aqui, o
+// entrypoint de cliente (HUD escondido) e o mixin da skin do braço. Ver RELATORIO-gravacao-cenas.md.
+tasks.named("processGametestResources") {
+	inputs.property "showcase", project.hasProperty("showcase")
+	if (project.hasProperty("showcase") && !project.hasProperty("perf")) {
+		doLast {
+			def modJson = new File(destinationDir, "fabric.mod.json")
+			modJson.text = modJson.text
+				.replaceAll(/(?s)"fabric-client-gametest": \[.*?\]/, '"fabric-client-gametest": ["dev.migzu.handyphone.test.showcase.ShowcaseTest"],\n\t\t"client": ["dev.migzu.handyphone.test.showcase.ShowcaseClient"]')
+				.replace('"entrypoints"', '"mixins": ["handyphone-test.mixins.json"],\n\t"entrypoints"')
+		}
+	}
+}
+if (project.hasProperty("showcase")) {
+	tasks.matching { it.name == "runClientGameTest" }.configureEach {
+		def showcaseDir = layout.buildDirectory.dir("showcase").get().asFile
+		doFirst {
+			showcaseDir.mkdirs()
+		}
+		systemProperty "handyphone.showcase", "true"
+		systemProperty "handyphone.showcase.dir", showcaseDir.absolutePath
+		// A skin do braço (PNG baixado do Mojang, guardado fora do jar em ../branding) e as cenas a gravar (ex.: -Pscenes=1,3).
+		systemProperty "handyphone.showcase.skin", file("../branding/skin-migzu.png").absolutePath
+		if (project.hasProperty("scenes")) {
+			systemProperty "handyphone.showcase.scenes", project.property("scenes")
+		}
+	}
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
+	// if it is present.
+	// If you remove this line, sources will not be generated.
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+	def projectName = project.name
+	inputs.property "projectName", projectName
+
+	from("LICENSE") {
+		rename { "${it}_$projectName"}
+	}
+}
+
+// configure the maven publication
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			from components.java
+		}
+	}
+
+	// See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
+	repositories {
+		// Add repositories to publish to here.
+		// Notice: This block does NOT have the same function as the block in the top level.
+		// The repositories here will be used for publishing your artifact, not for
+		// retrieving dependencies.
+	}
+}
+
+// Confere os textos do mod (./gradlew checkLang; roda também em ./gradlew build): todos os idiomas de lang/ têm as mesmas chaves do en_us e os mesmos
+// marcadores (%s, %1$s), toda chave usada no código existe, nenhuma chave sobra, e nenhum texto em português ficou fixo no código.
+// Para acrescentar um idioma, ver "Idiomas" no CLAUDE.md.
+tasks.register("checkLang") {
+	group = "verification"
+	description = "Confere en_us x pt_br, as chaves usadas no código e a ausência de texto fixo em português."
+	def langDir = file("src/main/resources/assets/handyphone/lang")
+	def soundsFile = file("src/main/resources/assets/handyphone/sounds.json")
+	def codeFiles = fileTree("src") { include "main/**/*.java", "client/**/*.java" }
+	inputs.dir(langDir)
+	inputs.file(soundsFile)
+	inputs.files(codeFiles)
+	doLast {
+		def slurper = new groovy.json.JsonSlurper()
+		def en = slurper.parse(new File(langDir, "en_us.json"), "UTF-8") as Map
+		def problems = []
+
+		// 1) todo idioma tem as chaves do en_us (os plurais, nas formas do idioma), nada vazio e os mesmos marcadores
+		// Formas de plural por idioma (a regra mora em Lang.pluralCategory; um idioma novo com outra regra entra aqui também).
+		// Todo idioma tem one e other; fr e es NÃO têm many (o inglês de reserva mostraria uma forma de outra língua no meio do texto).
+		def pluralForms = { String code ->
+			def language = code.split("_")[0]
+			["ru": ["one", "few", "many", "other"], "uk": ["one", "few", "many", "other"], "be": ["one", "few", "many", "other"], "pl": ["one", "few", "many", "other"]].get(language, ["one", "other"])
+		}
+		def markers = { String text ->
+			def found = []
+			int next = 1
+			def m = (text =~ /%(?:(\d+)\$)?(.)/)
+			while (m.find()) {
+				if (m.group(2) == "%") { continue }
+				if (m.group(2) != "s") { found << "?${m.group(0)}"; continue }
+				found << (m.group(1) ? m.group(1) as int : next++)
+			}
+			found.sort { it.toString() }
+		}
+		def enPluralBases = en.keySet().findAll { it.endsWith(".one") }.collect { it.substring(0, it.length() - 4) } as Set
+		en.keySet().findAll { it.endsWith(".few") || it.endsWith(".many") }.each { problems << "o en_us não pode ter formas além de one/other: ${it}" }
+		en.each { key, value ->
+			if (!(value instanceof String) || value.isEmpty()) { problems << "en_us vazio: ${key}" }
+			if (markers(value).any { it.toString().startsWith("?") }) { problems << "só %s e %n\$s são aceitos (en_us ${key})" }
+		}
+		def languages = []
+		langDir.listFiles().findAll { it.name.endsWith(".json") && it.name != "en_us.json" }.sort { it.name }.each { file ->
+			def code = file.name.substring(0, file.name.length() - 5)
+			languages << code
+			def lang = slurper.parse(file, "UTF-8") as Map
+			def forms = pluralForms(code)
+			// chaves esperadas: as do en_us, com cada base plural expandida nas formas deste idioma
+			def expected = [] as LinkedHashSet
+			en.keySet().each { key ->
+				def base = key.contains(".") ? key.substring(0, key.lastIndexOf(".")) : key
+				def suffix = key.contains(".") ? key.substring(key.lastIndexOf(".") + 1) : ""
+				if (enPluralBases.contains(base) && (suffix == "one" || suffix == "other")) { forms.each { expected << base + "." + it } }
+				else { expected << key }
+			}
+			(expected - lang.keySet()).each { problems << "falta em ${code}: ${it}" }
+			(lang.keySet() - expected).each { problems << "sobra em ${code} (não existe no en_us ou forma de plural que o idioma não usa): ${it}" }
+			lang.each { key, value ->
+				if (!(value instanceof String) || value.isEmpty()) { problems << "${code} vazio: ${key}"; return }
+				def base = key.contains(".") ? key.substring(0, key.lastIndexOf(".")) : key
+				def reference = enPluralBases.contains(base) && expected.contains(key) ? en[base + ".other"] : en[key]
+				if (reference != null && markers(value) != markers(reference)) { problems << "marcadores diferentes em ${code} ${key}: ${markers(value)} x ${markers(reference)}" }
+			}
+		}
+
+		// 2) chaves usadas no código (literais "handyphone.x.y"), contando os plurais (.one/.other) e os prefixos montados ("handyphone.a.")
+		def used = [] as Set
+		def literal = ~/"(handyphone\.[a-z0-9_.]*)"/
+		def fixedLiterals = []
+		codeFiles.each { file ->
+			def source = file.getText("UTF-8")
+			// Tira comentários e pega os literais (varredura simples que respeita aspas).
+			def literals = []
+			int i = 0, n = source.length()
+			while (i < n) {
+				// Códigos de caractere (em vez de literais de char, que o Groovy trata como texto): / = 47, * = 42, " = 34, ' = 39, barra invertida = 92, \n = 10.
+				int c = source.charAt(i) as int
+				int next = i + 1 < n ? (source.charAt(i + 1) as int) : 0
+				if (c == 47 && next == 47) { while (i < n && (source.charAt(i) as int) != 10) { i++ } }
+				else if (c == 47 && next == 42) { def end = source.indexOf("*/", i + 2); i = end < 0 ? n : end + 2 }
+				else if (c == 34) {
+					def sb = new StringBuilder()
+					i++
+					while (i < n && (source.charAt(i) as int) != 34) {
+						if ((source.charAt(i) as int) == 92 && i + 1 < n) { sb.append(source.charAt(i)).append(source.charAt(i + 1)); i += 2 } else { sb.append(source.charAt(i)); i++ }
+					}
+					i++
+					literals << sb.toString()
+				}
+				else if (c == 39) { i++; if (i < n && (source.charAt(i) as int) == 92) { i++ }; i += 2 }
+				else { i++ }
+			}
+			literals.each { text ->
+				def m = literal.matcher('"' + text + '"')
+				// Literais "handyphone.*" que não são chaves de idioma: nomes de arquivo (.json) e as propriedades de sistema (fonte, modo de gravação).
+				if (m.matches() && !m.group(1).endsWith(".json") && m.group(1) != "handyphone.font" && m.group(1) != "handyphone.showcase") { used << m.group(1) }
+				// 3) texto em português fixo no código
+				if (text ==~ /(?s).*[áàâãéêíóôõúçÁÀÂÃÉÊÍÓÔÕÚÇ].*/ || text ==~ /(?s).*\b(Enviar|Salvar|Voltar|Cancelar|Apagar|Mensagens?|Contatos?|Galeria|Chamando|Ligar|Desligar)\b.*/) {
+					problems << "texto em português fixo em ${file.name}: \"${text}\""
+				}
+			}
+		}
+		def enKeys = en.keySet()
+		used.each { key ->
+			if (key.endsWith(".")) {
+				if (!enKeys.any { it.startsWith(key) }) { problems << "prefixo usado sem chaves: ${key}" }
+			} else if (!enKeys.contains(key)) {
+				if (enKeys.contains(key + ".one") && enKeys.contains(key + ".other")) { return }
+				problems << "chave usada no código e ausente em en_us: ${key}"
+			}
+		}
+		// 4) chaves de mod que ninguém usa
+		def plurals = { String key -> key.endsWith(".one") || key.endsWith(".other") ? key.substring(0, key.lastIndexOf(".")) : key }
+		enKeys.findAll { it.startsWith("handyphone.") }.each { key ->
+			def base = plurals(key)
+			if (!(used.contains(key) || used.contains(base) || used.any { it.endsWith(".") && key.startsWith(it) })) { problems << "chave sem uso no código: ${key}" }
+		}
+		// plurais completos
+		enKeys.findAll { it.endsWith(".one") }.each { if (!enKeys.contains(it.substring(0, it.length() - 4) + ".other")) { problems << "falta .other: ${it}" } }
+		enKeys.findAll { it.endsWith(".other") }.each { if (!enKeys.contains(it.substring(0, it.length() - 6) + ".one")) { problems << "falta .one: ${it}" } }
+		// 5) legendas de som
+		def sounds = soundsFile.getText("UTF-8")
+		(sounds =~ /"subtitle"\s*:\s*"([^"]+)"/).each { all, key -> if (!enKeys.contains(key)) { problems << "legenda ausente em en_us: ${key}" } }
+
+		if (!problems.isEmpty()) {
+			throw new GradleException("checkLang encontrou ${problems.size()} problema(s):\n  - " + problems.join("\n  - "))
+		}
+		println "checkLang: ${en.size()} chaves em en_us e em ${languages.join(", ")}, tudo em ordem."
+	}
+}
+tasks.named("check") { dependsOn "checkLang" }
+
+// Variantes regionais dos idiomas: o Minecraft carrega só o inglês e o idioma escolhido (es_mx sem arquivo próprio aparece em inglês), então o
+// build copia o idioma-base para as variantes na pasta gerada build/generated/langVariants (nada duplicado no repositório). Quem quiser
+// um texto próprio de uma variante cria o arquivo dela em src/main/resources/.../lang: o arquivo do repositório vence a cópia.
+def langVariants = [
+	"es_es": ["es_mx", "es_ar", "es_cl", "es_ec", "es_uy", "es_ve"],
+	"de_de": ["de_at", "de_ch"],
+	"fr_fr": ["fr_ca"],
+	"pt_br": ["pt_pt"]
+]
+def langVariantsDir = layout.buildDirectory.dir("generated/langVariants")
+def langSourceDir = file("src/main/resources/assets/handyphone/lang")
+// Uma tarefa Sync só (apaga a cópia velha quando o arquivo próprio da variante passa a existir no repositório).
+def langVariantsTask = tasks.register("langVariants", Sync) {
+	into(langVariantsDir.map { it.dir("assets/handyphone/lang") })
+	langVariants.each { base, targets ->
+		targets.each { target ->
+			if (!new File(langSourceDir, "${target}.json").exists()) {
+				from(langSourceDir) {
+					include "${base}.json"
+					rename { "${target}.json" }
+				}
+			}
+		}
+	}
+}
+tasks.named("processResources") {
+	dependsOn(langVariantsTask)
+	from(langVariantsDir)
+}

@@ -1,0 +1,28 @@
+{
+	"schemaVersion": 1,
+	"id": "handyphone",
+	"version": "${version}",
+	"name": "Migzu's HandyPhone",
+	"description": "A real phone in Minecraft: messages, photos, location, calls and more.",
+	"authors": ["Migzu"],
+	"license": "All-Rights-Reserved",
+	"icon": "assets/handyphone/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["dev.migzu.handyphone.HandyPhone"],
+		"client": ["dev.migzu.handyphone.client.HandyPhoneClient"],
+		"voicechat": ["dev.migzu.handyphone.server.VoiceLink"]
+	},
+	"mixins": [
+		{ "config": "handyphone.client.mixins.json", "environment": "client" }
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"voicechat": "*"
+	}
+}
