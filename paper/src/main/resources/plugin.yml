@@ -1,0 +1,13 @@
+name: HandyPhone
+main: dev.migzu.handyphone.paper.HandyPhonePlugin
+version: '${version}'
+api-version: '26.3'
+description: A 3D phone for every player (messages, photos, map, calls). Server side; players use the HandyPhone Fabric mod.
+author: Migzu
+website: https://modrinth.com/mod/handyphone
+folia-supported: false
+softdepend: [voicechat, squaremap]
+permissions:
+  handyphone.admin:
+    description: Use /handyphone mute, unmute, wipe and info
+    default: op

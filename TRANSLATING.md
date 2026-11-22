@@ -3,7 +3,7 @@
 Migzu's HandyPhone is in English and Portuguese, written by hand. **Spanish, French, German and Russian were translated with AI and
 have not been reviewed by native speakers yet**, so they may sound odd or be wrong in places. Corrections are very welcome!
 
-All text lives in one folder: [`src/main/resources/assets/handyphone/lang/`](src/main/resources/assets/handyphone/lang/).
+All text lives in one folder: [`common/src/main/resources/assets/handyphone/lang/`](common/src/main/resources/assets/handyphone/lang/).
 `en_us.json` is the reference: every other file has the same keys.
 
 ## Quick fix (no GitHub skills needed)
@@ -18,7 +18,7 @@ A screenshot helps a lot. Mention where you saw the text (which app, which phone
 ## Fix it yourself (pull request)
 
 1. Open the file for your language, for example
-   [`fr_fr.json`](src/main/resources/assets/handyphone/lang/fr_fr.json), and click the pencil icon to edit it on GitHub.
+   [`fr_fr.json`](common/src/main/resources/assets/handyphone/lang/fr_fr.json), and click the pencil icon to edit it on GitHub.
 2. Change **only the text on the right**. Never rename or delete a key (the part on the left).
 3. Propose the change. GitHub opens a pull request for you.
 

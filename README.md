@@ -19,7 +19,8 @@ photos, maps with directions and voice calls (as a Simple Voice Chat addon). Pre
   blocking, and a config file to turn features on or off. Messages are not encrypted: the server owner can read them.
 
 ## Requirements
-Minecraft 26.3, Fabric Loader and Fabric API, on **both client and server**. Optional: Simple Voice Chat (calls) and squaremap (map terrain).
+Minecraft 26.3 with Fabric Loader and Fabric API on every player's client. Server: a Fabric server with the mod, **or a Paper server with the
+HandyPhone plugin** (`paper/`; both on Modrinth). Optional: Simple Voice Chat (calls) and squaremap (map terrain).
 Works with Sodium and Iris.
 
 ## Translations

@@ -1,0 +1,174 @@
+plugins {
+	id 'java-library'
+	id 'xyz.jpenilla.run-paper' version '3.1.0'
+}
+
+// O plugin Paper: só o lado do servidor do HandyPhone. Os jogadores continuam com o mod Fabric no cliente (mesmo protocolo,
+// mesmos bytes). O jar leva as classes de common/src/main (protocolo, serviço, idiomas), sem o PhoneOS nem os recursos do cliente;
+// o Gson e o slf4j já vêm no Paper e não entram.
+// A pasta build/ é a da raiz (build/libs/handyphone-paper-<versão>.jar), como no fabric/.
+layout.buildDirectory = rootProject.layout.projectDirectory.dir("build/paper")
+
+def commonDir = rootProject.file("common")
+
+repositories {
+	mavenCentral()
+	maven { url = "https://repo.papermc.io/repository/maven-public/" }
+	// API do Simple Voice Chat (só para compilar; o plugin é opcional em tempo de execução).
+	exclusiveContent {
+		forRepository { maven { url = "https://maven.maxhenkel.de/repository/public" } }
+		filter { includeGroup "de.maxhenkel.voicechat" }
+	}
+	exclusiveContent {
+		forRepository { maven { url = "https://api.modrinth.com/maven" } }
+		filter { includeGroup "maven.modrinth" }
+	}
+}
+
+sourceSets {
+	main {
+		java.srcDir(new File(commonDir, "src/main/java"))
+		resources.srcDir(new File(commonDir, "src/main/resources"))
+	}
+	// Plugin SÓ de teste (console: contas falsas e leituras do estado), usado pelo teste automático com um Paper de verdade.
+	testPlugin {
+		compileClasspath += main.output + main.compileClasspath
+		runtimeClasspath += main.output + main.runtimeClasspath
+	}
+}
+
+dependencies {
+	compileOnly "io.papermc.paper:paper-api:${project.paper_api_version}"
+	compileOnly "com.google.code.gson:gson:${project.gson_version}"
+	compileOnly "org.slf4j:slf4j-api:${project.slf4j_version}"
+	// APIs opcionais: só VoiceLink e SquaremapLink as tocam, depois de conferir que o plugin está ligado.
+	compileOnly "de.maxhenkel.voicechat:voicechat-api:${project.voicechat_api_version}"
+	compileOnly "xyz.jpenilla:squaremap-api:${project.squaremap_api_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = "UTF-8"
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+base {
+	archivesName = "handyphone-paper"
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+	filesMatching("plugin.yml") {
+		expand "version": version
+	}
+}
+
+// O jar do plugin: as classes e os idiomas do common/src/main (já entram pelo source set), o plugin.yml e a licença; nada do cliente.
+jar {
+	// O jar fica em build/libs, ao lado do do mod Fabric (handyphone-<versão>.jar).
+	destinationDirectory = rootProject.layout.projectDirectory.dir("build/libs")
+	from(rootProject.file("LICENSE")) {
+		rename { "LICENSE_handyphone" }
+	}
+}
+
+// Servidor Paper de verdade para desenvolver: ./gradlew :paper:runPaperServer [-Pvoice] [-Pmap]
+// (o nome não é runServer de propósito: o ./gradlew runServer da raiz é o do Fabric, e um runServer aqui rodaria os dois).
+// Pasta run-paper/ na raiz, modo offline, porta 25566 (o Fabric de teste usa a 25565), com o plugin recém-compilado.
+// -Pvoice baixa o Simple Voice Chat (Paper) e -Pmap o squaremap, como no Fabric.
+tasks.named("runServer") {
+	// A tarefa padrão do run-paper não é usada (ver acima); fica desligada para não rodar junto do runServer do Fabric.
+	enabled = false
+}
+tasks.register("runPaperServer", xyz.jpenilla.runpaper.task.RunServer) {
+	group = "run paper"
+	description = "Sobe um Paper ${project.paper_version} com o HandyPhone (-Pvoice, -Pmap opcionais)."
+	minecraftVersion(project.paper_version)
+	runDirectory = rootProject.layout.projectDirectory.dir("run-paper")
+	pluginJars.from(tasks.named("jar").flatMap { it.archiveFile })
+	systemProperty("com.mojang.eula.agree", "true")
+	minHeapSize = "1G"
+	maxHeapSize = "2G"
+	args("--nogui")
+	if (project.hasProperty("voice")) {
+		downloadPlugins { modrinth("simple-voice-chat", project.paper_voicechat_version) }
+	}
+	if (project.hasProperty("map")) {
+		downloadPlugins { modrinth("squaremap", project.paper_squaremap_version) }
+	}
+	def runDir = rootProject.file("run-paper")
+	doFirst {
+		runDir.mkdirs()
+		def props = new File(runDir, "server.properties")
+		if (!props.exists()) {
+			props.text = ["online-mode=false", "white-list=false", "server-port=25566", "query.port=25566", "motd=HandyPhone Paper dev", "enforce-secure-profile=false", "spawn-protection=0", "view-distance=8"].join(System.lineSeparator()) + System.lineSeparator()
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Teste contra um Paper de verdade: ./gradlew runClientGameTest -Ppaper (roda SÓ o PhonePaperTest, no projeto fabric).
+// Esta tarefa monta a pasta do servidor de teste: o jar do Paper (baixado uma vez, com SHA-256 conferido), o plugin recém-compilado
+// e o plugin de teste, EULA e server.properties (modo offline, porta 25577). O teste sobe e para o servidor por conta própria.
+tasks.register("testPluginJar", Jar) {
+	archiveBaseName = "handyphone-paper-test"
+	destinationDirectory = rootProject.layout.projectDirectory.dir("build/paper-test")
+	from(sourceSets.testPlugin.output)
+}
+
+tasks.register("preparePaperTest") {
+	group = "verification"
+	description = "Monta build/paper-test/server (Paper + HandyPhone + plugin de teste) para o PhonePaperTest."
+	dependsOn("jar", "testPluginJar")
+	def paperUrl = project.paper_server_url
+	def paperSha = project.paper_server_sha256
+	def baseDir = rootProject.layout.projectDirectory.dir("build/paper-test").asFile
+	def pluginJar = tasks.named("jar").flatMap { it.archiveFile }
+	def testJar = tasks.named("testPluginJar").flatMap { it.archiveFile }
+	def withVoice = project.hasProperty("voice")
+	def withMap = project.hasProperty("map")
+	def voiceUrl = project.paper_voicechat_url
+	def mapUrl = project.paper_squaremap_url
+	inputs.files(pluginJar, testJar)
+	// A pasta do servidor muda a cada teste (mundo, logs): a tarefa sempre roda, é barata.
+	outputs.upToDateWhen { false }
+	doLast {
+		def sha256 = { File file ->
+			def digest = java.security.MessageDigest.getInstance("SHA-256")
+			file.withInputStream { input ->
+				byte[] buffer = new byte[65536]
+				int n
+				while ((n = input.read(buffer)) > 0) { digest.update(buffer, 0, n) }
+			}
+			digest.digest().collect { String.format("%02x", it) }.join()
+		}
+		def download = { String url, File target, String sha ->
+			if (target.exists() && (sha == null || sha256(target) == sha)) { return }
+			target.parentFile.mkdirs()
+			def tmp = new File(target.parentFile, target.name + ".part")
+			new URL(url).withInputStream { input -> tmp.withOutputStream { out -> out << input } }
+			if (sha != null && sha256(tmp) != sha) { tmp.delete(); throw new GradleException("SHA-256 diferente em ${url}") }
+			java.nio.file.Files.move(tmp.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		}
+		def server = new File(baseDir, "server")
+		def plugins = new File(server, "plugins")
+		plugins.mkdirs()
+		download(paperUrl, new File(baseDir, "paper.jar"), paperSha)
+		// Plugins de uma execução anterior (por exemplo com -Pvoice) não podem sobrar.
+		plugins.listFiles()?.findAll { it.name.endsWith(".jar") }?.each { it.delete() }
+		java.nio.file.Files.copy(pluginJar.get().asFile.toPath(), new File(plugins, "HandyPhone.jar").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		java.nio.file.Files.copy(testJar.get().asFile.toPath(), new File(plugins, "HandyPhoneTest.jar").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		if (withVoice) { download(voiceUrl, new File(plugins, "voicechat.jar"), null) }
+		if (withMap) { download(mapUrl, new File(plugins, "squaremap.jar"), null) }
+		new File(server, "eula.txt").text = "eula=true" + System.lineSeparator()
+		def props = new File(server, "server.properties")
+		props.text = ["online-mode=false", "white-list=false", "server-port=25577", "query.port=25577", "motd=HandyPhone Paper test", "enforce-secure-profile=false", "spawn-protection=0",
+			"view-distance=6", "simulation-distance=4", "gamemode=survival", "pause-when-empty-seconds=-1", "level-type=minecraft:flat", "generate-structures=false",
+			"spawn-monsters=false", "spawn-animals=false"].join(System.lineSeparator()) + System.lineSeparator()
+	}
+}

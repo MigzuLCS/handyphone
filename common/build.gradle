@@ -1,0 +1,88 @@
+// O núcleo do HandyPhone: Java puro, sem nenhuma classe do Minecraft, do Fabric nem do Paper (só o JDK, o Gson e o
+// slf4j, que as três plataformas já trazem). Duas partes:
+//   main   = protocolo (PhonePayloads sobre PhoneBuf), lógica do servidor (PhoneService, ligações, localização, fotos,
+//            config, disco), idiomas (lang/, que o servidor também lê) e o codec das fotos;
+//   client = o PhoneOS (Java2D) e os recursos do celular que qualquer carregador do jogo usa (fontes, sons, texturas).
+// O fabric/ compila estas fontes dentro do próprio jar (ver fabric/build.gradle); aqui elas compilam sozinhas, o que prova
+// que nada do jogo entrou, e os testes JUnit rodam sem jogo: ./gradlew :common:test
+plugins {
+	id 'java-library'
+}
+
+repositories {
+	mavenCentral()
+	exclusiveContent {
+		forRepository { maven { url = "https://maven.maxhenkel.de/repository/public" } }
+		filter { includeGroup "de.maxhenkel.voicechat" }
+	}
+}
+
+sourceSets {
+	client {
+		compileClasspath += main.output + main.compileClasspath
+		runtimeClasspath += main.output + main.runtimeClasspath
+	}
+}
+
+dependencies {
+	// As versões que o Minecraft 26.3 traz (no Fabric, no Paper e no NeoForge elas já estão no servidor).
+	compileOnly "com.google.code.gson:gson:${project.gson_version}"
+	compileOnly "org.slf4j:slf4j-api:${project.slf4j_version}"
+	// APIs opcionais: só VoiceLink e SquaremapLink as tocam, e só depois de conferir que o mod está instalado.
+	compileOnly "de.maxhenkel.voicechat:voicechat-api:${project.voicechat_api_version}"
+	compileOnly "xyz.jpenilla:squaremap-api:${project.squaremap_api_version}"
+
+	testImplementation "com.google.code.gson:gson:${project.gson_version}"
+	testImplementation "org.slf4j:slf4j-api:${project.slf4j_version}"
+	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = "UTF-8"
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+test {
+	useJUnitPlatform()
+	// Os testes escrevem em pastas temporárias; nada de mundo nem de jogo.
+	testLogging {
+		events "failed"
+		exceptionFormat "full"
+	}
+}
+
+// Nada do jogo pode entrar aqui (é o que permite o Paper e o NeoForge): o build falha se alguma fonte do common importar
+// classes do Minecraft, do Fabric, do Paper/Bukkit ou do NeoForge.
+tasks.register("checkPure") {
+	group = "verification"
+	description = "Confere que o common não importa nada do Minecraft, do Fabric, do Paper nem do NeoForge."
+	def sources = fileTree("src") { include "**/*.java" }
+	inputs.files(sources)
+	doLast {
+		def forbidden = ~/(?m)^\s*import\s+(static\s+)?(net\.minecraft|net\.fabricmc|com\.mojang|org\.bukkit|io\.papermc|net\.neoforged)\b.*$/
+		def problems = []
+		sources.each { file ->
+			def text = file.getText("UTF-8")
+			def m = forbidden.matcher(text)
+			while (m.find()) { problems << "${file.name}: ${m.group().trim()}" }
+			if (text =~ /\b(net\.minecraft|net\.fabricmc|com\.mojang|org\.bukkit|io\.papermc|net\.neoforged)\.[a-z]/) {
+				problems << "${file.name}: nome completo de classe da plataforma"
+			}
+		}
+		if (!problems.isEmpty()) {
+			throw new GradleException("common importa classes de plataforma:\n  - " + problems.join("\n  - "))
+		}
+		println "checkPure: ${sources.files.size()} fontes do common sem nada do Minecraft, Fabric, Paper ou NeoForge."
+	}
+}
+tasks.named("check") { dependsOn "checkPure" }
+
+// O PhoneOS (source set client) também compila sozinho, sem o jogo, a cada build.
+tasks.named("assemble") { dependsOn "clientClasses" }

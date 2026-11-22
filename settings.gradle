@@ -11,3 +11,8 @@ pluginManagement {
 
 // Should match your modid
 rootProject.name = 'handyphone'
+
+// common = o núcleo em Java puro (protocolo, servidor, PhoneOS); fabric = o mod Fabric (Loom), que leva o common no mesmo jar.
+// paper = o plugin Paper (só o lado do servidor; os jogadores usam o mod Fabric no cliente), jar handyphone-paper-<versão>.jar.
+// Os comandos de sempre rodam da raiz: ./gradlew build, runClient, runServer, runClientGameTest (e as flags -P...).
+include 'common', 'fabric', 'paper'
