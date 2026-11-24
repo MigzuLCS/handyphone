@@ -63,6 +63,17 @@ final class ModernTheme extends Theme {
 		return Lang.t("handyphone.theme.modern.description");
 	}
 
+	@Override
+	float[] iconBox(PhoneOS os, int i) {
+		float[] r = iconRect(os, i);
+		return new float[] {r[0], r[1], ICON, ICON, ICON_R};
+	}
+
+	@Override
+	Color accent() {
+		return new Color(0x3D5AFE);
+	}
+
 	// ------------------------------------------------------------------ layout
 
 	@Override
@@ -350,7 +361,7 @@ final class ModernTheme extends Theme {
 		g.setFont(font(Font.BOLD, 21f));
 		Ui.text(g, app.name(), SX + 14, SY + 54);
 
-		if (!os.drawApp(g, app, appBody(), new Color(0x3D5AFE))) {
+		if (!os.drawApp(g, app, appBody(), accent())) {
 			AffineTransform t = g.getTransform();
 			g.translate(FACE_W / 2f - 32, SY + 118);
 			drawIcon(g, app, 64, 18, 1f);

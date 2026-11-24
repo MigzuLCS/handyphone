@@ -2,9 +2,14 @@ package dev.migzu.handyphone.client.phone;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.migzu.handyphone.HandyPhone;
 import dev.migzu.handyphone.client.os.PhoneClock;
 import dev.migzu.handyphone.client.os.PhoneOS;
+import dev.migzu.handyphone.client.os.PhoneSettings;
 import dev.migzu.handyphone.client.os.PhoneSound;
 import dev.migzu.handyphone.client.os.Spring;
 import java.io.IOException;
@@ -32,11 +37,11 @@ public final class PhoneController {
 	/** FOV vertical fixo que o Minecraft usa para desenhar a mão. */
 	public static final double HAND_FOV_DEGREES = 70.0;
 
-	private static final class ConfigData {
-		String theme = "flat";
-		boolean uiSounds = true;
-		boolean keyboardSounds = true;
-	}
+	/** Campo do handyphone.json que não é opção do celular: último conflito de tecla já avisado no chat (KeyConflictNotice). */
+	private static final String KEY_CONFLICT_FIELD = "keyConflictWarned";
+
+	/** Último conflito de tecla já avisado; ver {@link KeyConflictNotice}. */
+	private String keyConflictWarned = "";
 
 	/** FOV vertical (graus) com que o jogo desenha a mão neste quadro; atualizado pelo mixin do GameRenderer. */
 	public static volatile float handFov = (float) HAND_FOV_DEGREES;
@@ -56,6 +61,12 @@ public final class PhoneController {
 
 	private boolean inUse;
 	private boolean expanded;
+	/** A tela de entrada está fechando para o celular voltar à mão (não é para guardá-lo). */
+	private boolean shrinking;
+	/** Fração da roda ainda não usada (touchpad manda frações de clique). */
+	private double scrollRemainder;
+	/** Quando o celular foi para a mão pela última vez (puxado ou encolhido); a dica dos controles aparece por alguns segundos. */
+	private long handSinceMillis;
 	/** O celular estava visível no último quadro; serve para devolver o item da mão quando ele some. */
 	private boolean wasShown;
 	/** Câmera que o jogador usava antes de puxar o celular (o celular só existe em primeira pessoa). */
@@ -68,9 +79,16 @@ public final class PhoneController {
 
 	private PhoneController() {
 		loadConfig();
-		os.setSettingsListener(this::saveConfig);
+		applySettingsToGame();
+		os.setSettingsListener(() -> {
+			saveConfig();
+			applySettingsToGame();
+		});
+		os.setShortcutKeys(PhoneShortcut.INSTANCE);
+		os.setModVersion(FabricLoader.getInstance().getModContainer(HandyPhone.MOD_ID)
+			.map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse(""));
 		os.setCamera(PhoneCameraSource.INSTANCE);
-		os.setSoundListener(sound -> PhoneSounds.play(sound, os.themeId()));
+		os.setSoundListener(sound -> PhoneSounds.play(sound, os.soundThemeId()));
 	}
 
 	/** Arquivo único de configuração do celular (estilo e sons). */
@@ -87,13 +105,18 @@ public final class PhoneController {
 		try {
 			Path file = configFile();
 			if (Files.exists(file)) {
-				ConfigData cfg = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), ConfigData.class);
-				if (cfg != null) {
-					if (cfg.theme != null) {
-						os.setTheme(cfg.theme.trim());
+				// Os campos de PhoneSettings ficam no topo do arquivo, com os mesmos nomes de antes (theme, uiSounds, keyboardSounds):
+				// o arquivo de versões anteriores é lido sem migração, e o que faltar fica no padrão.
+				JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+				if (root != null && root.isJsonObject()) {
+					JsonObject obj = root.getAsJsonObject();
+					PhoneSettings cfg = GSON.fromJson(obj, PhoneSettings.class);
+					if (cfg != null) {
+						os.applySettings(cfg);
 					}
-					os.setUiSounds(cfg.uiSounds);
-					os.setKeyboardSounds(cfg.keyboardSounds);
+					if (obj.has(KEY_CONFLICT_FIELD) && obj.get(KEY_CONFLICT_FIELD).isJsonPrimitive()) {
+						keyConflictWarned = obj.get(KEY_CONFLICT_FIELD).getAsString();
+					}
 				}
 				return;
 			}
@@ -107,13 +130,27 @@ public final class PhoneController {
 		}
 	}
 
+	/** O que das opções vale fora do PhoneOS (o resto o jogo lê na hora: balanço, dica). */
+	private void applySettingsToGame() {
+		PhoneSounds.setVolume(os.settings().volume() / 100f);
+	}
+
+	String keyConflictWarned() {
+		return keyConflictWarned;
+	}
+
+	void setKeyConflictWarned(String signature) {
+		if (!signature.equals(keyConflictWarned)) {
+			keyConflictWarned = signature;
+			saveConfig();
+		}
+	}
+
 	private void saveConfig() {
 		try {
-			ConfigData cfg = new ConfigData();
-			cfg.theme = os.themeId();
-			cfg.uiSounds = os.uiSounds();
-			cfg.keyboardSounds = os.keyboardSounds();
-			Files.writeString(configFile(), GSON.toJson(cfg) + "\n", StandardCharsets.UTF_8);
+			JsonObject obj = GSON.toJsonTree(os.settings()).getAsJsonObject();
+			obj.addProperty(KEY_CONFLICT_FIELD, keyConflictWarned);
+			Files.writeString(configFile(), GSON.toJson(obj) + "\n", StandardCharsets.UTF_8);
 		} catch (IOException | RuntimeException e) {
 			HandyPhone.LOGGER.warn("Couldn't save the phone settings", e);
 		}
@@ -174,15 +211,40 @@ public final class PhoneController {
 		pullProgress = 0f;
 		String themeId;
 		synchronized (os) {
-			themeId = os.themeId();
+			themeId = os.soundThemeId();
 			os.setAwake(true);
+			os.setFocusMode(!expanded);
 		}
+		scrollRemainder = 0;
+		handSinceMillis = System.currentTimeMillis();
 		PhoneSounds.play(PhoneSound.PULL, themeId);
 		PhoneSounds.play(pull.sound(), themeId);
-		mc.gui.setScreen(new PhoneInputScreen());
+		if (expanded) {
+			mc.gui.setScreen(new PhoneInputScreen());
+		}
 	}
 
-	/** Chamado quando a tela de entrada fecha (por qualquer motivo). */
+	/** Guarda o celular, esteja ele na mão (sem tela) ou expandido (a tela fecha e chama {@link #onClosed}). */
+	public void putAway() {
+		if (!inUse) {
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.gui.screen() instanceof PhoneInputScreen) {
+			mc.gui.setScreen(null);
+		} else {
+			onClosed();
+		}
+	}
+
+	/** A tela de entrada fechou. Se foi para voltar à mão (encolher), o celular continua em uso; senão, foi guardado. */
+	void onScreenRemoved() {
+		if (!shrinking) {
+			onClosed();
+		}
+	}
+
+	/** Guarda o celular (a tela já fechou, ou o celular estava na mão). */
 	public void onClosed() {
 		if (!inUse) {
 			return;
@@ -198,23 +260,128 @@ public final class PhoneController {
 		previousCamera = null;
 		String themeId;
 		synchronized (os) {
-			themeId = os.themeId();
+			themeId = os.soundThemeId();
 			os.setAwake(false);
+			os.setFocusMode(false);
 		}
 		PhoneSounds.play(PhoneSound.PUT_AWAY, themeId);
 	}
 
+	/**
+	 * Expandido (no centro, com cursor e teclado: abre a tela de entrada) ou na mão (câmera livre, a roda move o destaque:
+	 * a tela fecha sem guardar o celular).
+	 */
 	public void toggleExpanded() {
 		if (!inUse) {
 			return;
 		}
+		Minecraft mc = Minecraft.getInstance();
 		expanded = !expanded;
 		expand.target = expanded ? 1 : 0;
 		String themeId;
 		synchronized (os) {
-			themeId = os.themeId();
+			themeId = os.soundThemeId();
+			os.setFocusMode(!expanded);
+			if (!expanded) {
+				os.blurKeyboard();
+			}
+		}
+		scrollRemainder = 0;
+		if (!expanded) {
+			handSinceMillis = System.currentTimeMillis();
 		}
 		PhoneSounds.play(expanded ? PhoneSound.EXPAND : PhoneSound.COLLAPSE, themeId);
+		if (expanded) {
+			if (!(mc.gui.screen() instanceof PhoneInputScreen)) {
+				mc.gui.setScreen(new PhoneInputScreen());
+			}
+		} else if (mc.gui.screen() instanceof PhoneInputScreen) {
+			shrinking = true;
+			try {
+				mc.gui.setScreen(null);
+			} finally {
+				shrinking = false;
+			}
+		}
+	}
+
+	long handSinceMillis() {
+		return handSinceMillis;
+	}
+
+	/** Celular na mão, sem tela: a roda, os botões do mouse e a tecla são do celular (ver MouseHandlerMixin e handTick). */
+	public boolean inHand() {
+		return inUse && !expanded && Minecraft.getInstance().gui.screen() == null;
+	}
+
+	/**
+	 * Roda com o celular na mão (no lugar de trocar o item da barra). Cada clique move o destaque um item; frações (touchpad)
+	 * se acumulam. Retorna true se o evento foi do celular.
+	 */
+	public boolean handScroll(double amount) {
+		if (!inHand()) {
+			return false;
+		}
+		scrollRemainder += amount;
+		synchronized (os) {
+			while (scrollRemainder >= 1) {
+				os.focusMove(-1);
+				scrollRemainder -= 1;
+			}
+			while (scrollRemainder <= -1) {
+				os.focusMove(1);
+				scrollRemainder += 1;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Botões do mouse com o celular na mão: esquerdo toca o item destacado, direito volta (na tela inicial, guarda), meio
+	 * expande. Só o apertar é do celular; soltar segue para o jogo (zera o que estava apertado antes de puxar). Os botões
+	 * laterais não são tocados. Retorna true se o evento foi do celular.
+	 */
+	public boolean handButton(int button, boolean press) {
+		if (!press || !inHand() || (button != InputConstants.MOUSE_BUTTON_LEFT && button != InputConstants.MOUSE_BUTTON_RIGHT
+			&& button != InputConstants.MOUSE_BUTTON_MIDDLE)) {
+			return false;
+		}
+		if (button == InputConstants.MOUSE_BUTTON_MIDDLE) {
+			toggleExpanded();
+			return true;
+		}
+		boolean typing;
+		boolean handled = true;
+		synchronized (os) {
+			// Só expande se este clique acabou de tocar num campo de texto (nunca por um campo que já estava ativo).
+			boolean before = os.wantsKeyboard();
+			if (button == InputConstants.MOUSE_BUTTON_LEFT) {
+				os.focusActivate();
+			} else {
+				handled = os.back();
+			}
+			typing = !before && os.wantsKeyboard();
+		}
+		if (!handled) {
+			putAway();
+		} else if (typing) {
+			// Tocou num campo de texto: o teclado precisa da tela de entrada, então o celular expande sozinho.
+			toggleExpanded();
+		}
+		return true;
+	}
+
+	/**
+	 * A cada tick: na mão, o celular guarda sozinho se outra tela abriu (inventário, chat, pausa) ou se não dá mais para usá-lo
+	 * (espectador, dormindo, interface oculta). Expandido, a tela de entrada cuida disso.
+	 */
+	public void handTick(Minecraft mc) {
+		if (!inUse || expanded) {
+			return;
+		}
+		if (mc.gui.screen() != null || !canPull(mc)) {
+			onClosed();
+		}
 	}
 
 	/**
@@ -233,6 +400,7 @@ public final class PhoneController {
 			dt = lastFrameNanos == 0 ? 0 : Math.min((now - lastFrameNanos) / 1e9, 0.1);
 			lastFrameNanos = now;
 		}
+		PhoneCursor.endFrame();
 		if (!wasShown) {
 			return;
 		}

@@ -20,6 +20,12 @@ import java.awt.image.BufferedImage;
 final class CameraApp extends AppContent {
 	private static final float MARGIN = 6f;
 
+	/** Na mão, ao abrir a Câmera o destaque já está no disparador (não na miniatura da galeria). */
+	@Override
+	String firstFocus() {
+		return "shutter";
+	}
+
 	@Override
 	void draw(Graphics2D g, PhoneOS os, float x, float y, float w, float h, Color accent) {
 		PhoneData data = os.data;
@@ -45,7 +51,10 @@ final class CameraApp extends AppContent {
 		float stateY = vy + vh + 12;
 		g.setFont(Ui.font(Font.PLAIN, 7.2f));
 		g.setColor(new Color(0xB4B6C2));
-		Ui.centered(g, status(os), x + w / 2f, stateY);
+		String status = status(os);
+		if (!status.isEmpty()) {
+			Ui.centered(g, status, x + w / 2f, stateY);
+		}
 
 		float shutterY = Math.min(y + h - 36, stateY + 34);
 		drawShutter(g, os, x + w / 2f, shutterY, accent);
@@ -92,8 +101,15 @@ final class CameraApp extends AppContent {
 		if (data.photoUsedBytes >= data.photoQuotaBytes) {
 			return Lang.t("handyphone.camera.status.full");
 		}
-		return Lang.plural("handyphone.camera.status.count", data.gallery.size());
+		// No dia a dia, nenhum texto (o contador de fotos parecia um aviso); só perto da cota de espaço.
+		if (data.photoUsedBytes >= data.photoQuotaBytes * ALMOST_FULL) {
+			return Lang.t("handyphone.camera.status.almost_full");
+		}
+		return "";
 	}
+
+	/** Fração da cota de espaço a partir da qual a câmera avisa que a galeria está quase cheia. */
+	private static final double ALMOST_FULL = 0.9;
 
 	/** Cantos de enquadramento e uma cruz discreta no centro. */
 	private static void drawFrameMarks(Graphics2D g, float x, float y, float w, float h) {

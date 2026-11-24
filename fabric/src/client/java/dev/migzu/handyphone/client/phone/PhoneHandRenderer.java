@@ -4,7 +4,9 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import dev.migzu.handyphone.client.os.PhoneOS;
+import dev.migzu.handyphone.client.os.PhoneSettings;
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.util.LightCoordsUtil;
@@ -23,6 +25,22 @@ public final class PhoneHandRenderer {
 	private static final float SURFACE_GAP = 0.0012f;
 	private static final Vector3f LIGHT_DIR = new Vector3f(-0.35f, 0.75f, 0.55f).normalize();
 	private static final Vector3f HALF_DIR = new Vector3f(LIGHT_DIR).add(0f, 0f, 1f).normalize();
+
+	/**
+	 * Quanto do balanço da caminhada (e do atraso da mão ao virar) o celular na mão cancela: 0,9 = sobra 10%. Vem de
+	 * Ajustes > Navegação > Balanço ao andar (padrão 10%); 1 = firme, como no expandido.
+	 */
+	private static float handSteady() {
+		return 1f - PhoneController.INSTANCE.os.settings().handSway() / 100f;
+	}
+
+	// Cruz do cursor, em pontos da tela do celular (FACE_W x FACE_H): meio braço, meia espessura e contorno.
+	private static final float CURSOR_ARM = 5.5f;
+	private static final float CURSOR_THICK = 0.65f;
+	private static final float CURSOR_OUTLINE = 0.55f;
+	private static final float CURSOR_PRESSED_SCALE = 0.72f;
+	private static final int CURSOR_COLOR = 0xFFFFFFFF;
+	private static final int CURSOR_OUTLINE_COLOR = 0xFF1A1A1A;
 
 	/** Giro extra em Y (graus), usado só pelo teste automático para fotografar a lateral e a traseira. */
 	public static volatile float debugYaw;
@@ -59,9 +77,15 @@ public final class PhoneHandRenderer {
 		// Ler a matriz em uso, em vez de supor a do jogo puro, mantém o expandido e o clique certos nos dois casos.
 		Matrix4f viewRot = new Matrix4f(RenderSystem.getModelViewStack());
 
+		// Na mão, o balanço da caminhada quase some (ver handSteady()); vale para o braço também, senão ele se descola do celular.
+		float handSteady = handSteady() * Mth.clamp(r, 0f, 1f);
+
 		// Braço: acompanha o celular e sai de cena quando ele expande.
 		if (showArm) {
 			poseStack.pushPose();
+			if (handSteady > 0f) {
+				poseStack.last().pose().lerp(viewRot.invert(new Matrix4f()), handSteady);
+			}
 			poseStack.scale(fovFix, fovFix, 1f);
 			poseStack.translate(side * -0.08f * r, 0.10f * r, 0f);
 			poseStack.rotateDegrees(Axis.ZP, side * 8f);
@@ -70,9 +94,11 @@ public final class PhoneHandRenderer {
 		}
 
 		poseStack.pushPose();
-		// Expandido: cancela o balanço da caminhada para o celular ficar firme na tela.
-		if (e01 > 0f) {
-			poseStack.last().pose().lerp(viewRot.invert(new Matrix4f()), e01);
+		// Expandido: cancela o balanço da caminhada para o celular ficar firme na tela. Na mão, quase todo (sobra um pouco, para
+		// ele não parecer colado na câmera): balançando inteiro dava enjoo e não dava para ler. Some com a subida (r), sem pulo ao guardar.
+		float steady = Math.max(e01, handSteady);
+		if (steady > 0f) {
+			poseStack.last().pose().lerp(viewRot.invert(new Matrix4f()), steady);
 		}
 		poseStack.scale(fovFix, fovFix, 1f);
 
@@ -91,6 +117,8 @@ public final class PhoneHandRenderer {
 		poseStack.scale(height, height, height);
 
 		ctrl.setViewModel(new Matrix4f(viewRot).mul(poseStack.last().pose()));
+		// Onde o mouse cai na tela, com a matriz deste quadro (null durante a puxada e fora do aparelho).
+		float[] cursor = PhoneCursor.locate(Minecraft.getInstance(), ctrl);
 
 		// Animação de puxada (ver PullAnimations): roda até o aparelho assentar na mão.
 		float pullProgress = ctrl.pullProgress();
@@ -129,7 +157,52 @@ public final class PhoneHandRenderer {
 			buffer.addVertex(pose, hw, 0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(1f, 0f).setLight(light);
 			buffer.addVertex(pose, -hw, 0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(0f, 0f).setLight(light);
 		});
+		// Destaque da roda (celular na mão), no vidro: anima a cada quadro sem redesenhar a tela.
+		PhoneOS.FocusShape focus = ctrl.inHand() ? ctrl.os.focusShape() : null;
+		if (focus != null) {
+			PhoneSettings settings = ctrl.os.settings();
+			collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE),
+				(pose, buffer) -> PhoneFocusRing.submit(pose, buffer, focus, settings, hw, SURFACE_GAP * 2f, LightCoordsUtil.FULL_BRIGHT));
+		} else {
+			PhoneFocusRing.reset();
+		}
+		if (cursor != null) {
+			submitCursor(collector, poseStack, cursor, hw);
+		}
 		poseStack.popPose();
+	}
+
+	/**
+	 * Cruz do cursor colada no vidro: um contorno escuro e, por cima, a cruz branca (legível em qualquer papel de parede).
+	 * Medidas em pontos da tela do celular; apertar o botão encolhe a cruz, como um toque.
+	 */
+	private static void submitCursor(SubmitNodeCollector collector, PoseStack poseStack, float[] cursor, float hw) {
+		float unit = 1f / PhoneOS.FACE_H;
+		float cx = cursor[0] * unit - hw;
+		float cy = 0.5f - cursor[1] * unit;
+		float scale = PhoneCursor.pressed() ? CURSOR_PRESSED_SCALE : 1f;
+		float arm = CURSOR_ARM * unit * scale;
+		float thick = CURSOR_THICK * unit;
+		float outline = CURSOR_OUTLINE * unit;
+		collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
+			int light = LightCoordsUtil.FULL_BRIGHT;
+			cross(pose, buffer, cx, cy, arm + outline, thick + outline, SURFACE_GAP * 2f, CURSOR_OUTLINE_COLOR, light);
+			cross(pose, buffer, cx, cy, arm, thick, SURFACE_GAP * 3f, CURSOR_COLOR, light);
+		});
+	}
+
+	/** Duas barras (horizontal e vertical) centradas em (cx, cy), no plano z da tela. */
+	private static void cross(PoseStack.Pose pose, VertexConsumer buffer, float cx, float cy, float arm, float thick, float z, int color, int light) {
+		rect(pose, buffer, cx - arm, cy - thick, cx + arm, cy + thick, z, color, light);
+		rect(pose, buffer, cx - thick, cy - arm, cx + thick, cy - thick, z, color, light);
+		rect(pose, buffer, cx - thick, cy + thick, cx + thick, cy + arm, z, color, light);
+	}
+
+	private static void rect(PoseStack.Pose pose, VertexConsumer buffer, float x0, float y0, float x1, float y1, float z, int color, int light) {
+		buffer.addVertex(pose, x0, y0, z).setColor(color).setUv(0.5f, 0.5f).setLight(light);
+		buffer.addVertex(pose, x1, y0, z).setColor(color).setUv(0.5f, 0.5f).setLight(light);
+		buffer.addVertex(pose, x1, y1, z).setColor(color).setUv(0.5f, 0.5f).setLight(light);
+		buffer.addVertex(pose, x0, y1, z).setColor(color).setUv(0.5f, 0.5f).setLight(light);
 	}
 
 	/** Desenha quads sólidos; a textura do corpo é branca no centro, então a cor vem só dos vértices. */

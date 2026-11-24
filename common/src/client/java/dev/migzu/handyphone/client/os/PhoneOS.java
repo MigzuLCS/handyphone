@@ -1,6 +1,7 @@
 package dev.migzu.handyphone.client.os;
 
 import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Composite;
 import java.awt.Font;
@@ -16,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -45,6 +47,10 @@ public final class PhoneOS {
 	private static final double BANNER_SECONDS = 4.0;
 	/** Intervalo mínimo entre tiques de rolagem, para não virar metralhadora. */
 	private static final double SCROLL_SOUND_INTERVAL = 0.055;
+	/** Velocidade com que a rolagem pendente é entregue (1/s); 18 = 95% em ~170 ms. */
+	private static final double SCROLL_RATE = 18;
+	/** Abaixo disto (em cliques, ~0,8 ponto) o resto sai de uma vez. */
+	private static final float SCROLL_SNAP = 0.02f;
 
 	/** Teclas especiais repassadas pelo jogo quando um campo de texto está em uso. */
 	public enum Key { BACKSPACE, ENTER, TAB }
@@ -99,11 +105,12 @@ public final class PhoneOS {
 	final List<Theme> themes = List.of(new RetroTheme(), new AeroTheme(), new FlatTheme(), new ModernTheme());
 	/** Tema de quem nunca escolheu um: o Minimalista (decisão do Migzu, 2026-11-19; antes era o Clássico). */
 	Theme theme = themes.get(2);
+	static final String DEFAULT_THEME = "flat";
 	private Consumer<String> themeListener = id -> { };
 	private Runnable settingsListener = () -> { };
 	private Consumer<PhoneSound> soundListener = s -> { };
-	private boolean uiSounds = true;
-	private boolean keyboardSounds = true;
+	/** Opções do app Ajustes (ver {@link PhoneSettings}); mudam só por {@link #changeSettings}. */
+	private final PhoneSettings settings = new PhoneSettings();
 
 	/** Espelho do que o servidor sabe sobre este jogador. */
 	final PhoneData data = new PhoneData();
@@ -164,6 +171,12 @@ public final class PhoneOS {
 	private boolean dirty = true;
 	private boolean caretOn;
 	private double lastScrollSoundTime = -1;
+	/** Rolagem da roda ainda por entregar ao app, em cliques; sai aos poucos em {@link #step} para a lista deslizar. */
+	private float pendingScroll;
+	/** App que recebe a rolagem pendente; se outro app (ou nenhum) estiver à vista, o resto é descartado. */
+	private AppContent pendingScrollTarget;
+	/** Um clique da roda chegou e ainda não tocou o "tic" (um por clique, não um por fração entregue). */
+	private boolean scrollTickArmed;
 
 	public PhoneOS() {
 		for (int i = 0; i < press.length; i++) {
@@ -199,12 +212,13 @@ public final class PhoneOS {
 	}
 
 	/** Conteúdo do app aberto, ou null (tela inicial ou app ainda sem conteúdo). */
-	private AppContent content() {
+	AppContent content() {
 		return isAppOpen() ? contents.get(apps.get(openApp).id()) : null;
 	}
 
 	/** Botão "voltar"/início. Retorna false se já estava na tela inicial. */
 	public boolean back() {
+		focusBack = true;
 		if (modal != null) {
 			cancelModal();
 			playSound(PhoneSound.APP_CLOSE);
@@ -249,6 +263,9 @@ public final class PhoneOS {
 					appOpen.snap(1);
 				}
 				AppContent content = contents.get(appId);
+				// Destaque da roda: o app recomeça do jeito de sempre e a tela inicial volta para o ícone dele.
+				homeFocus = "icon:" + i;
+				focusTrail.removeIf(e -> e.getKey() == content);
 				if (content != null) {
 					content.opened(this);
 				}
@@ -276,18 +293,144 @@ public final class PhoneOS {
 		return theme.id();
 	}
 
+	/** De qual tema vêm os sons: o escolhido em Ajustes > Sons, ou o tema em uso (automático). */
+	public String soundThemeId() {
+		String id = settings.soundTheme();
+		return id.isEmpty() ? theme.id() : id;
+	}
+
 	/** Troca o estilo da interface. Ids desconhecidos são ignorados. */
 	public void setTheme(String id) {
+		if (switchTheme(id)) {
+			settings.setTheme(id);
+			playSound(PhoneSound.THEME_CHANGE);
+			themeListener.accept(id);
+			settingsListener.run();
+		}
+	}
+
+	private boolean switchTheme(String id) {
 		for (Theme candidate : themes) {
 			if (candidate.id().equals(id) && candidate != theme) {
 				theme.releaseCaches();
 				theme = candidate;
 				dirty = true;
-				playSound(PhoneSound.THEME_CHANGE);
-				themeListener.accept(id);
-				settingsListener.run();
+				return true;
 			}
 		}
+		return false;
+	}
+
+	/** Cor do destaque da roda: a escolhida nos Ajustes, ou um tom diferente da cor de destaque dos botões (automática). */
+	int highlightColor() {
+		int chosen = settings.highlightColor();
+		if (chosen >= 0) {
+			return chosen;
+		}
+		int base = accentOr(theme.accent()).getRGB() & 0xFFFFFF;
+		float[] hsb = Color.RGBtoHSB((base >> 16) & 0xFF, (base >> 8) & 0xFF, base & 0xFF, null);
+		// Branco, preto e cinzas não têm cor para dar um tom: virariam um cinza que parece contorno. Usa a cor do tema.
+		if (hsb[1] < 0.18f) {
+			base = theme.accent().getRGB() & 0xFFFFFF;
+		}
+		return highlightTone(base);
+	}
+
+	/**
+	 * Um tom diferente da mesma cor, para o destaque não sumir em cima de um botão da cor de destaque: cor escura ou média fica
+	 * mais clara e menos saturada (um tom pastel); cor já clara fica mais escura.
+	 */
+	static int highlightTone(int rgb) {
+		float[] hsb = Color.RGBtoHSB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, null);
+		float luma = (0.2126f * ((rgb >> 16) & 0xFF) + 0.7152f * ((rgb >> 8) & 0xFF) + 0.0722f * (rgb & 0xFF)) / 255f;
+		float s, b;
+		if (luma < 0.62f) {
+			s = hsb[1] * 0.55f;
+			b = Math.min(1f, hsb[2] + 0.38f);
+		} else {
+			s = Math.min(1f, hsb[1] * 1.1f);
+			b = hsb[2] * 0.58f;
+		}
+		return Color.HSBtoRGB(hsb[0], s, b) & 0xFFFFFF;
+	}
+
+	/** A cor de destaque escolhida nos Ajustes, ou {@code themeColor} se o jogador deixou na automática. */
+	Color accentOr(Color themeColor) {
+		int rgb = settings.accent();
+		if (rgb < 0) {
+			return themeColor;
+		}
+		if (accentColor == null || (accentColor.getRGB() & 0xFFFFFF) != rgb) {
+			accentColor = new Color(rgb);
+		}
+		return accentColor;
+	}
+
+	private Color accentColor;
+	private ShortcutKeys shortcutKeys = ShortcutKeys.NONE;
+	private volatile String modVersion = "";
+
+	public void setShortcutKeys(ShortcutKeys keys) {
+		shortcutKeys = keys == null ? ShortcutKeys.NONE : keys;
+	}
+
+	ShortcutKeys shortcutKeys() {
+		return shortcutKeys;
+	}
+
+	/** Versão do mod, mostrada em Ajustes > Sobre. */
+	public void setModVersion(String version) {
+		modVersion = version == null ? "" : version;
+	}
+
+	String modVersion() {
+		return modVersion;
+	}
+
+	/** Pede um redesenho (a ponte da tecla avisa quando a captura termina). */
+	public void markDirty() {
+		dirty = true;
+	}
+
+	/** As opções atuais (só leitura fora deste pacote: os setters do {@link PhoneSettings} não são públicos). */
+	public PhoneSettings settings() {
+		return settings;
+	}
+
+	/**
+	 * Aplica opções lidas do disco, sem som e sem avisar quem salva. Um tema desconhecido fica no padrão; o resto é corrigido
+	 * para a faixa válida.
+	 */
+	public void applySettings(PhoneSettings loaded) {
+		PhoneSettings s = loaded.copy().normalize();
+		if (!switchTheme(s.theme()) && !theme.id().equals(s.theme())) {
+			s.setTheme(theme.id());
+		}
+		settings.setTheme(s.theme());
+		settings.setAccent(s.accent());
+		settings.setHighlight(s.highlight());
+		settings.setHighlightAnimated(s.highlightAnimated());
+		settings.setHighlightColor(s.highlightColor());
+		settings.setScrollSpeed(s.scrollSpeed());
+		settings.setHandSway(s.handSway());
+		settings.setControlsHint(s.controlsHint());
+		settings.setUiSounds(s.uiSounds());
+		settings.setKeyboardSounds(s.keyboardSounds());
+		settings.setVolume(s.volume());
+		settings.setSoundTheme(themes.stream().anyMatch(t -> t.id().equals(s.soundTheme())) ? s.soundTheme() : "");
+		settings.setNotifyBanner(s.notifyBanner());
+		settings.setNotifySound(s.notifySound());
+		dirty = true;
+	}
+
+	/** Muda uma opção; se mudou de fato, redesenha e avisa quem salva. Devolve se mudou. */
+	boolean changeSettings(java.util.function.Predicate<PhoneSettings> change) {
+		if (!change.test(settings)) {
+			return false;
+		}
+		dirty = true;
+		settingsListener.run();
+		return true;
 	}
 
 	/** Avisado quando o jogador troca o estilo, para a escolha ser salva. */
@@ -306,44 +449,43 @@ public final class PhoneOS {
 	}
 
 	public boolean uiSounds() {
-		return uiSounds;
+		return settings.uiSounds();
 	}
 
 	public void setUiSounds(boolean enabled) {
-		if (uiSounds != enabled) {
-			uiSounds = enabled;
-			dirty = true;
-			settingsListener.run();
-		}
+		changeSettings(s -> s.setUiSounds(enabled));
 	}
 
 	public boolean keyboardSounds() {
-		return keyboardSounds;
+		return settings.keyboardSounds();
 	}
 
 	public void setKeyboardSounds(boolean enabled) {
-		if (keyboardSounds != enabled) {
-			keyboardSounds = enabled;
-			dirty = true;
-			settingsListener.run();
-		}
+		changeSettings(s -> s.setKeyboardSounds(enabled));
 	}
 
 	void playSound(PhoneSound sound) {
 		if (sound == null) {
 			return;
 		}
-		if (sound.group() == PhoneSound.Group.KEYBOARD && !keyboardSounds) {
+		if (sound.group() == PhoneSound.Group.KEYBOARD && !settings.keyboardSounds()) {
 			return;
 		}
-		if ((sound.group() == PhoneSound.Group.UI || sound.group() == PhoneSound.Group.NOTIFICATION) && !uiSounds) {
+		if ((sound == PhoneSound.NOTIFICATION || sound == PhoneSound.NOTIFICATION_GROUP) && !settings.notifySound()) {
+			return;
+		}
+		if ((sound.group() == PhoneSound.Group.UI || sound.group() == PhoneSound.Group.NOTIFICATION) && !settings.uiSounds()) {
 			return;
 		}
 		soundListener.accept(sound);
 	}
 
 	void playScrollTick() {
+		if (!scrollTickArmed) {
+			return;
+		}
 		if (time - lastScrollSoundTime >= SCROLL_SOUND_INTERVAL) {
+			scrollTickArmed = false;
 			lastScrollSoundTime = time;
 			playSound(PhoneSound.SCROLL_TICK);
 		}
@@ -361,6 +503,7 @@ public final class PhoneOS {
 
 	public void step(double dt) {
 		time += dt;
+		stepScroll(dt);
 		unlock.step(dt);
 		appOpen.step(dt);
 		homeBarPress.step(dt);
@@ -371,6 +514,9 @@ public final class PhoneOS {
 		if (openApp >= 0 && appOpen.target == 0 && appOpen.value < 0.002) {
 			openApp = -1;
 			appOpen.snap(0);
+			// Um último desenho sem o app: a mola já parou, e a tela ficaria presa no quadro do fim da animação (o app quase
+			// transparente por cima da tela inicial, o "fantasma" visto ao voltar do Mapa).
+			dirty = true;
 		}
 		if (banner.target > 0 && time > bannerUntil) {
 			banner.target = 0;
@@ -433,6 +579,9 @@ public final class PhoneOS {
 	}
 
 	public boolean isAnimating() {
+		if (pendingScroll != 0f) {
+			return true;
+		}
 		if (!unlock.isResting() || !appOpen.isResting() || !homeBarPress.isResting() || !banner.isResting()) {
 			return true;
 		}
@@ -634,12 +783,21 @@ public final class PhoneOS {
 
 	/** Mostra um aviso no topo da tela. {@code conversation} >= 0 faz o toque no aviso abrir a conversa. */
 	public void notify(String title, String text, long conversation) {
-		showBanner(title, text, conversation, "messages");
+		if (conversation < 0 || settings.notifyBanner()) {
+			showBanner(title, text, conversation, "messages");
+		}
 		if (conversation < 0) {
 			playSound(PhoneSound.ERROR);
 		} else {
 			PhoneData.Conversation c = data.conversation(conversation);
 			playSound(c != null && c.group ? PhoneSound.NOTIFICATION_GROUP : PhoneSound.NOTIFICATION);
+		}
+	}
+
+	/** Aviso de notificação (chamada perdida, localização ao vivo): some se o jogador desligou o aviso no topo. */
+	private void notificationBanner(String title, String text, String glyph) {
+		if (settings.notifyBanner()) {
+			showBanner(title, text, -1, glyph);
 		}
 	}
 
@@ -774,7 +932,7 @@ public final class PhoneOS {
 		if (liveReceived) {
 			for (PhoneData.Live fresh : entries) {
 				if (data.liveOf(fresh.number()) == null) {
-					showBanner(data.displayName(fresh.number()), Lang.t("handyphone.banner.live_started"), -1, "map");
+					notificationBanner(data.displayName(fresh.number()), Lang.t("handyphone.banner.live_started"), "map");
 					playSound(PhoneSound.NOTIFICATION);
 				}
 			}
@@ -1303,6 +1461,369 @@ public final class PhoneOS {
 		backend.open(conversation, c == null ? 0 : data.haveSeq(c));
 	}
 
+	// ------------------------------------------------------------------ destaque da roda (celular na mão, sem cursor)
+
+	/** Celular na mão: a roda move um destaque entre o que dá para tocar e o botão esquerdo "toca" o destacado. */
+	private boolean focusMode;
+	/** Chave do item destacado ("icon:<n>" na tela inicial, a chave da área clicável num app), ou null. */
+	private String focusKey;
+	/** Camada em que o destaque está (app, janela, ligação; a tela inicial é a lista de apps); trocar de camada recomeça. */
+	private Object focusLayer;
+	/** Último retângulo do destaque, para achar o vizinho quando a chave some (a lista rolou ou mudou). */
+	private float[] focusRect;
+
+	/** Liga o destaque (celular na mão) ou desliga (expandido, com cursor; ou guardado). */
+	public void setFocusMode(boolean on) {
+		if (focusMode != on) {
+			focusMode = on;
+			dirty = true;
+		}
+	}
+
+	public boolean focusMode() {
+		return focusMode;
+	}
+
+	/** Camada que recebe os toques agora: a janela, a ligação, o app aberto, ou null (tela inicial). */
+	private AppContent focusContentLayer() {
+		if (modal != null) {
+			return modal;
+		}
+		if (callScreenVisible()) {
+			return callScreen;
+		}
+		return isAppOpen() ? content() : null;
+	}
+
+	/** Itens destacáveis da camada atual, em ordem de leitura (linhas de cima para baixo, cada linha da esquerda para a direita). */
+	private List<Map.Entry<String, float[]>> focusTargets() {
+		List<Map.Entry<String, float[]>> out = new ArrayList<>();
+		if (!awake || unlock.value < 0.6) {
+			return out;
+		}
+		AppContent layer = focusContentLayer();
+		float[] screen = theme.screen();
+		if (layer == null && (openApp >= 0 || isAppOpen())) {
+			// App sem conteúdo próprio (Sobre: o tema desenha a página) ou app abrindo/fechando: nada a destacar (os ícones estão cobertos).
+			return out;
+		}
+		if (layer != null) {
+			float[] area = layer == content() ? theme.appBody() : screen;
+			float screenArea = screen[2] * screen[3];
+			for (Map.Entry<String, float[]> e : layer.focusTargets().entrySet()) {
+				float[] r = e.getValue();
+				// Fora da área visível (a lista rolou) ou um "fundo" que pega a tela quase toda (fechar tocando fora): não é um item.
+				float visibleH = Math.min(r[1] + r[3], area[1] + area[3]) - Math.max(r[1], area[1]);
+				if (visibleH < Math.min(r[3], 8f) * 0.5f || r[2] * r[3] > screenArea * 0.6f) {
+					continue;
+				}
+				out.add(e);
+			}
+			if (callBarVisible() && layer == content()) {
+				out.add(Map.entry("callbar", CallScreen.barRect(screen)));
+			}
+		} else {
+			for (int i = 0; i < apps.size(); i++) {
+				float[] r = iconRect(i);
+				if (r != null) {
+					out.add(Map.entry("icon:" + i, r));
+				}
+			}
+		}
+		out.sort((a, b) -> {
+			float[] ra = a.getValue(), rb = b.getValue();
+			float ca = ra[1] + ra[3] / 2f, cb = rb[1] + rb[3] / 2f;
+			if (Math.abs(ca - cb) > Math.min(ra[3], rb[3]) / 2f) {
+				return Float.compare(ca, cb);
+			}
+			return Float.compare(ra[0], rb[0]);
+		});
+		return out;
+	}
+
+	/** Caixa de um ícone da tela inicial, medida pelo próprio iconAt do tema (vale para os 4 temas); null se não está à vista. */
+	private float[] iconRect(int i) {
+		float[] c = theme.iconCenter(this, i);
+		if (c == null || theme.iconAt(this, c[0], c[1]) != i) {
+			return null;
+		}
+		float left = 0, right = 0, up = 0, down = 0;
+		while (left < 40 && theme.iconAt(this, c[0] - left - 1, c[1]) == i) {
+			left++;
+		}
+		while (right < 40 && theme.iconAt(this, c[0] + right + 1, c[1]) == i) {
+			right++;
+		}
+		while (up < 40 && theme.iconAt(this, c[0], c[1] - up - 1) == i) {
+			up++;
+		}
+		while (down < 40 && theme.iconAt(this, c[0], c[1] + down + 1) == i) {
+			down++;
+		}
+		return new float[] {c[0] - left, c[1] - up, left + right + 1, up + down + 1};
+	}
+
+	/** Identidade da camada atual (o app aberto, a janela, a ligação; a tela inicial é a própria lista de apps). */
+	private Object focusLayerNow() {
+		AppContent layer = focusContentLayer();
+		return layer != null ? layer : apps;
+	}
+
+	/** Índice do item destacado na lista; se a chave sumiu, o mais perto do último lugar; -1 se não há destaque nesta camada. */
+	private int focusIndex(List<Map.Entry<String, float[]>> targets) {
+		if (focusKey == null || focusLayerNow() != focusLayer || targets.isEmpty()) {
+			return -1;
+		}
+		for (int i = 0; i < targets.size(); i++) {
+			if (targets.get(i).getKey().equals(focusKey)) {
+				return i;
+			}
+		}
+		if (focusRect == null) {
+			return -1;
+		}
+		int best = -1;
+		float bestD = Float.MAX_VALUE;
+		for (int i = 0; i < targets.size(); i++) {
+			float[] r = targets.get(i).getValue();
+			float d = Math.abs(r[1] + r[3] / 2f - (focusRect[1] + focusRect[3] / 2f)) * 4
+				+ Math.abs(r[0] + r[2] / 2f - (focusRect[0] + focusRect[2] / 2f));
+			if (d < bestD) {
+				bestD = d;
+				best = i;
+			}
+		}
+		return best;
+	}
+
+	/** Itens tocados com o esquerdo, por camada (o mais recente no fim): ao voltar, o destaque volta para o que levou adiante. */
+	private final java.util.ArrayDeque<Map.Entry<Object, String>> focusTrail = new java.util.ArrayDeque<>();
+	/** Ícone do último app aberto: ao chegar na tela inicial, o destaque está sempre nele. */
+	private String homeFocus;
+	/** O esquerdo acabou de tocar: se o item sumir no próximo desenho, abriu-se uma tela nova (destaque no começo dela). */
+	private boolean focusForward;
+	/** O voltar acabou de agir: se o item sumir, o destaque volta para o que tinha levado à tela de agora. */
+	private boolean focusBack;
+
+	private static int indexOfKey(List<Map.Entry<String, float[]>> targets, String key) {
+		for (int i = 0; key != null && i < targets.size(); i++) {
+			if (targets.get(i).getKey().equals(key)) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Decide o item destacado neste desenho, com a mesma regra em todo lugar:
+	 * <ul>
+	 * <li>o item de antes continua na tela: fica nele;</li>
+	 * <li>tela inicial: o ícone do último app aberto;</li>
+	 * <li>voltou (direito, ou fechou uma janela ou a ligação por cima): o último item tocado nesta tela que ainda existe (a página dos
+	 * Ajustes, a conversa, o "⋮");</li>
+	 * <li>tela nova (app aberto, item tocado que levou adiante, janela): o item principal dela ({@link AppContent#firstFocus}) ou o
+	 * primeiro;</li>
+	 * <li>o item sumiu por outro motivo (a lista mudou): o vizinho mais perto.</li>
+	 * </ul>
+	 */
+	private int resolveFocus(List<Map.Entry<String, float[]>> targets) {
+		Object layer = focusLayerNow();
+		boolean sameLayer = layer == focusLayer && focusKey != null;
+		int i = sameLayer ? indexOfKey(targets, focusKey) : -1;
+		if (i < 0) {
+			boolean fromOverlay = !sameLayer && focusLayer != null && focusLayer != apps && !contents.containsValue(focusLayer);
+			if (layer == apps) {
+				i = indexOfKey(targets, homeFocus);
+			} else if (focusBack || fromOverlay) {
+				i = trailIndex(layer, targets);
+			}
+			if (i < 0 && (!sameLayer || focusForward || focusBack)) {
+				AppContent content = layer instanceof AppContent a ? a : null;
+				i = Math.max(0, indexOfKey(targets, content != null ? content.firstFocus() : null));
+			}
+			if (i < 0) {
+				i = Math.max(0, focusIndex(targets));
+			}
+			setFocus(targets.get(i));
+		}
+		focusForward = false;
+		focusBack = false;
+		return i;
+	}
+
+	/** O último item tocado nesta camada que ainda está na tela, ou -1. */
+	private int trailIndex(Object layer, List<Map.Entry<String, float[]>> targets) {
+		for (java.util.Iterator<Map.Entry<Object, String>> it = focusTrail.descendingIterator(); it.hasNext();) {
+			Map.Entry<Object, String> e = it.next();
+			if (e.getKey() == layer) {
+				int i = indexOfKey(targets, e.getValue());
+				if (i >= 0) {
+					return i;
+				}
+			}
+		}
+		return -1;
+	}
+
+	/** Lembra o item tocado (o mais recente vai para o fim; no máximo 32). */
+	private void rememberFocus(Object layer, String key) {
+		focusTrail.removeIf(e -> e.getKey() == layer && e.getValue().equals(key));
+		focusTrail.addLast(Map.entry(layer, key));
+		while (focusTrail.size() > 32) {
+			focusTrail.removeFirst();
+		}
+	}
+
+	private void setFocus(Map.Entry<String, float[]> target) {
+		focusLayer = focusLayerNow();
+		focusKey = target.getKey();
+		focusRect = target.getValue();
+		dirty = true;
+	}
+
+	/** Chave e retângulo do item destacado agora, ou null; para os testes. */
+	public Map.Entry<String, float[]> focused() {
+		List<Map.Entry<String, float[]>> targets = focusTargets();
+		int i = focusIndex(targets);
+		return i < 0 ? null : targets.get(i);
+	}
+
+	/**
+	 * Roda com o celular na mão: dir = +1 desce para o próximo item, -1 sobe. Na ponta de uma lista que rola, rola a lista
+	 * (o destaque fica no item, que sobe ou desce com ela); no fim da tela inicial ou de uma janela, para.
+	 */
+	public void focusMove(int dir) {
+		if (!awake || !focusMode) {
+			return;
+		}
+		List<Map.Entry<String, float[]>> targets = focusTargets();
+		if (targets.isEmpty()) {
+			scrollContentForFocus(dir);
+			return;
+		}
+		int i = focusIndex(targets);
+		if (i < 0) {
+			// Primeiro movimento nesta camada: destaca o primeiro (descendo) ou o último (subindo).
+			setFocus(targets.get(dir > 0 ? 0 : targets.size() - 1));
+			playSound(PhoneSound.SCROLL_TICK);
+			return;
+		}
+		int next = i + dir;
+		if (next < 0 || next >= targets.size()) {
+			scrollContentForFocus(dir);
+			return;
+		}
+		setFocus(targets.get(next));
+		playSound(PhoneSound.SCROLL_TICK);
+		keepFocusVisible();
+	}
+
+	/** Na ponta da lista: um clique de rolagem no app (descer = roda para baixo = valor negativo). */
+	private void scrollContentForFocus(int dir) {
+		AppContent content = content();
+		if (content != null && focusContentLayer() == content && content.smoothScroll()) {
+			scroll(dir > 0 ? -1f : 1f);
+		}
+	}
+
+	/** Se o item destacado está cortado pela borda do app, rola o bastante para mostrá-lo inteiro. */
+	private void keepFocusVisible() {
+		AppContent content = content();
+		if (focusRect == null || content == null || focusContentLayer() != content || !content.smoothScroll()) {
+			return;
+		}
+		float[] body = theme.appBody();
+		float overBottom = focusRect[1] + focusRect[3] - (body[1] + body[3]);
+		float overTop = body[1] - focusRect[1];
+		if (overBottom > 0.5f) {
+			scroll(-(overBottom + 6f) / AppContent.SCROLL_STEP);
+		} else if (overTop > 0.5f) {
+			scroll((overTop + 6f) / AppContent.SCROLL_STEP);
+		}
+	}
+
+	/** Botão esquerdo com o celular na mão: toca no centro do item destacado (o mesmo caminho de um clique). */
+	public void focusActivate() {
+		if (!awake || !focusMode) {
+			return;
+		}
+		List<Map.Entry<String, float[]>> targets = focusTargets();
+		int i = focusIndex(targets);
+		if (i < 0) {
+			if (!targets.isEmpty()) {
+				setFocus(targets.get(0));
+				playSound(PhoneSound.SCROLL_TICK);
+			}
+			return;
+		}
+		float[] r = targets.get(i).getValue();
+		float cx = r[0] + r[2] / 2f, cy = r[1] + r[3] / 2f;
+		rememberFocus(focusLayer, targets.get(i).getKey());
+		focusForward = true;
+		pointerDown(cx, cy);
+		pointerUp(cx, cy);
+	}
+
+	/** O celular voltou para a mão: o campo de texto em foco solta o teclado (as teclas voltam a ser do jogo). */
+	public void blurKeyboard() {
+		AppContent layer = focusContentLayer();
+		if (layer != null && layer.wantsKeyboard()) {
+			layer.blur();
+			dirty = true;
+		}
+	}
+
+	/**
+	 * O destaque não é desenhado na imagem da tela: ele é uma borda viva no vidro, animada a cada quadro pela mão 3D (como a cruz
+	 * do cursor), sem redesenhar a tela. Aqui só se decide qual item está destacado e se publica onde ele está, em pontos da face.
+	 *
+	 * @param key   chave do item (muda = o destaque passa para outro item; a mão anima a troca)
+	 * @param x     caixa do item {x, y, w, h} e o raio dos cantos
+	 * @param clip  área onde o destaque pode aparecer {x, y, w, h} (a tela)
+	 * @param color cor da borda (a de destaque dos Ajustes, ou a do tema)
+	 */
+	public record FocusShape(String key, float x, float y, float w, float h, float arc, float[] clip, int color) {
+	}
+
+	private volatile FocusShape focusShape;
+
+	/** Onde está o destaque agora (thread da mão lê), ou null sem destaque. */
+	public FocusShape focusShape() {
+		return focusShape;
+	}
+
+	/** Atualiza o destaque publicado; chamado a cada redesenho da tela. */
+	private void drawFocus(Graphics2D g) {
+		if (!focusMode || !awake || unlock.value < 0.9) {
+			focusShape = null;
+			focusForward = false;
+			focusBack = false;
+			return;
+		}
+		List<Map.Entry<String, float[]>> targets = focusTargets();
+		if (targets.isEmpty()) {
+			focusShape = null;
+			return;
+		}
+		int i = resolveFocus(targets);
+		// Acompanha o item (a lista rolou, o app redesenhou): guarda o lugar novo.
+		focusKey = targets.get(i).getKey();
+		float[] r = targets.get(i).getValue();
+		focusRect = r;
+		float arc = Math.min(10f, Math.min(r[2], r[3]) * 0.45f);
+		if (focusKey.startsWith("icon:")) {
+			// Na tela inicial o destaque contorna o desenho do ícone (com o raio dos cantos do tema), não a área de toque.
+			float[] box = theme.iconBox(this, Integer.parseInt(focusKey.substring(5)));
+			if (box != null) {
+				r = box;
+				arc = box[4];
+			}
+		}
+		// A chave inclui a camada: o mesmo nome de área em outra tela (outro app) também é uma troca de item.
+		String key = System.identityHashCode(focusLayer) + "/" + focusKey;
+		focusShape = new FocusShape(key, r[0], r[1], r[2], r[3], arc, theme.screen().clone(), highlightColor());
+	}
+
 	// ------------------------------------------------------------------ toque e teclado
 
 	public void pointerDown(float x, float y) {
@@ -1465,13 +1986,41 @@ public final class PhoneOS {
 		}
 	}
 
-	/** Roda do mouse; positivo = para cima. */
+	/** Roda do mouse; positivo = para cima. Listas recebem o clique aos poucos (ver {@link #step}); degraus, de uma vez. */
 	public void scroll(float amount) {
 		AppContent content = content();
 		if (awake && content != null && modal == null && !callScreenVisible()) {
-			content.scroll(this, amount);
+			scrollTickArmed = true;
+			if (content.smoothScroll()) {
+				if (pendingScrollTarget != content || Math.signum(pendingScroll) != Math.signum(amount)) {
+					// Outro app, ou a roda virou de sentido: começa do zero (inverter não deve "frear" o que sobrou).
+					pendingScroll = 0;
+				}
+				pendingScrollTarget = content;
+				pendingScroll += amount * settings.scrollSpeed() / 100f;
+			} else {
+				pendingScroll = 0;
+				content.scroll(this, amount);
+			}
 			dirty = true;
 		}
+	}
+
+	/** Entrega uma fração da rolagem pendente: ~26% por quadro a 60 Hz, quase tudo em ~200 ms (desacelera no fim). */
+	private void stepScroll(double dt) {
+		if (pendingScroll == 0f) {
+			return;
+		}
+		AppContent content = content();
+		if (!awake || content == null || content != pendingScrollTarget || modal != null || callScreenVisible() || !content.smoothScroll()) {
+			pendingScroll = 0f;
+			pendingScrollTarget = null;
+			return;
+		}
+		float part = Math.abs(pendingScroll) < SCROLL_SNAP ? pendingScroll : pendingScroll * (float) (1 - Math.exp(-SCROLL_RATE * dt));
+		pendingScroll -= part;
+		content.scroll(this, part);
+		dirty = true;
 	}
 
 	// ------------------------------------------------------------------ ligações
@@ -1519,7 +2068,7 @@ public final class PhoneOS {
 					// Perdida enquanto tocava: um aviso, sem tela cheia.
 					String who = previous == PhoneData.CALL_INCOMING && !previousPeer.isEmpty() ? data.displayName(previousPeer) : Lang.t("handyphone.banner.call");
 					call.clear();
-					showBanner(who, Lang.t("handyphone.banner.missed_call"), -1, "phone");
+					notificationBanner(who, Lang.t("handyphone.banner.missed_call"), "phone");
 					playSound(PhoneSound.NOTIFICATION);
 				}
 			}
@@ -1779,6 +2328,7 @@ public final class PhoneOS {
 		drawCall(g);
 		drawModal(g);
 		drawBanner(g);
+		drawFocus(g);
 		theme.drawScreenMask(g, pixelScale);
 	}
 
@@ -1791,7 +2341,7 @@ public final class PhoneOS {
 		float[] screen = theme.screen();
 		Shape oldClip = g.getClip();
 		g.clip(new Rectangle2D.Float(screen[0], screen[1], screen[2], screen[3]));
-		Color accent = openApp >= 0 ? apps.get(openApp).c2() : new Color(0x1976D2);
+		Color accent = accentOr(openApp >= 0 ? apps.get(openApp).c2() : new Color(0x1976D2));
 		m.render(g, this, screen[0], screen[1], screen[2], screen[3], accent);
 		g.setClip(oldClip);
 	}
@@ -1807,7 +2357,7 @@ public final class PhoneOS {
 		}
 		Shape oldClip = g.getClip();
 		g.clip(new Rectangle2D.Float(body[0], body[1], body[2], body[3]));
-		content.render(g, this, body[0], body[1], body[2], body[3], accent);
+		content.render(g, this, body[0], body[1], body[2], body[3], accentOr(accent));
 		g.setClip(oldClip);
 		return true;
 	}

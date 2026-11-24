@@ -35,6 +35,19 @@ abstract class Theme {
 	abstract String description();
 
 	/**
+	 * Caixa do desenho do ícone {x, y, w, h, raio dos cantos} na tela inicial (o destaque da roda contorna o ícone, não a área
+	 * de toque, que inclui o nome). null = usar a área de toque.
+	 */
+	float[] iconBox(PhoneOS os, int i) {
+		return null;
+	}
+
+	/** Cor de destaque própria do tema (botões, chaves; e o destaque da roda quando o jogador deixa a cor na automática). */
+	Color accent() {
+		return new Color(0x2B6BE4);
+	}
+
+	/**
 	 * Desliga (só nos testes) o atalho de não desenhar a tela inicial por baixo de um app totalmente aberto, para conferir que o atalho
 	 * não muda nenhum pixel (PhonePerfTest).
 	 */

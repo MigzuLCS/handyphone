@@ -112,26 +112,42 @@ final class MessagesApp extends AppContent {
 	}
 
 	@Override
+	void pointerMoved(PhoneOS os, float x, float y) {
+		if (view == View.PHOTO) {
+			viewer.drag(x, y);
+		}
+	}
+
+	@Override
+	void pointerReleased() {
+		viewer.release();
+	}
+
+	@Override
 	void scroll(PhoneOS os, float amount) {
 		switch (view) {
 			case LIST -> {
-				float next = Math.max(0, Math.min(listScroll - amount * 18, listMaxScroll));
-				if (Math.abs(next - listScroll) > 0.5f) {
+				float next = Math.max(0, Math.min(listScroll - amount * SCROLL_STEP, listMaxScroll));
+				if (Math.abs(next - listScroll) > 0.01f) {
 					listScroll = next;
 					os.playScrollTick();
 				}
 			}
 			case CHAT -> {
-				float next = Math.max(0, Math.min(chatScroll + amount * 18, chatMaxScroll));
-				if (Math.abs(next - chatScroll) > 0.5f) {
+				float next = Math.max(0, Math.min(chatScroll + amount * SCROLL_STEP, chatMaxScroll));
+				if (Math.abs(next - chatScroll) > 0.01f) {
 					chatScroll = next;
 					os.playScrollTick();
 				}
 			}
-			case PHOTO -> { }
+			case PHOTO -> {
+				if (!os.focusMode()) {
+					viewer.scroll(os, amount);
+				}
+			}
 			default -> {
-				float next = Math.max(0, Math.min(pickScroll - amount * 18, pickMaxScroll));
-				if (Math.abs(next - pickScroll) > 0.5f) {
+				float next = Math.max(0, Math.min(pickScroll - amount * SCROLL_STEP, pickMaxScroll));
+				if (Math.abs(next - pickScroll) > 0.01f) {
 					pickScroll = next;
 					os.playScrollTick();
 				}

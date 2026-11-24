@@ -72,16 +72,32 @@ final class GalleryApp extends AppContent {
 	}
 
 	@Override
+	void pointerMoved(PhoneOS os, float x, float y) {
+		if (view == View.PHOTO) {
+			viewer.drag(x, y);
+		}
+	}
+
+	@Override
+	void pointerReleased() {
+		viewer.release();
+	}
+
+	@Override
 	void scroll(PhoneOS os, float amount) {
 		if (view == View.GRID) {
-			float next = Math.max(0, Math.min(scroll - amount * 18, maxScroll));
-			if (Math.abs(next - scroll) > 0.5f) {
+			float next = Math.max(0, Math.min(scroll - amount * SCROLL_STEP, maxScroll));
+			if (Math.abs(next - scroll) > 0.01f) {
 				scroll = next;
 				os.playScrollTick();
 			}
+		} else if (view == View.PHOTO) {
+			if (!os.focusMode()) {
+				viewer.scroll(os, amount);
+			}
 		} else if (view == View.SEND) {
-			float next = Math.max(0, Math.min(sendScroll - amount * 18, sendMaxScroll));
-			if (Math.abs(next - sendScroll) > 0.5f) {
+			float next = Math.max(0, Math.min(sendScroll - amount * SCROLL_STEP, sendMaxScroll));
+			if (Math.abs(next - sendScroll) > 0.01f) {
 				sendScroll = next;
 				os.playScrollTick();
 			}

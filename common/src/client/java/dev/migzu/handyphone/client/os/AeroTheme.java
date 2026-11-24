@@ -67,6 +67,17 @@ final class AeroTheme extends Theme {
 		return Lang.t("handyphone.theme.aero.description");
 	}
 
+	@Override
+	float[] iconBox(PhoneOS os, int i) {
+		float[] r = iconRect(os, i);
+		return new float[] {r[0], r[1], ICON, ICON, ICON * 0.18f};
+	}
+
+	@Override
+	Color accent() {
+		return new Color(0x1E88C8);
+	}
+
 	// ------------------------------------------------------------------ layout
 
 	/** Canto superior esquerdo do ícone i. */
@@ -545,7 +556,7 @@ final class AeroTheme extends Theme {
 		Ui.text(g, app.name(), SX + 36, top + 16.2f);
 
 		float[] body = appBody();
-		if (!os.drawApp(g, app, body, new Color(0x1E88C8))) {
+		if (!os.drawApp(g, app, body, accent())) {
 			float cx = body[0] + body[2] / 2f;
 			t = g.getTransform();
 			g.translate(cx - 28, body[1] + 48);

@@ -56,11 +56,11 @@ final class ContactsApp extends AppContent {
 	@Override
 	void scroll(PhoneOS os, float amount) {
 		if (showingBlocked) {
-			blockedScroll = Math.max(0, blockedScroll - amount * 18);
+			blockedScroll = Math.max(0, blockedScroll - amount * SCROLL_STEP);
 			os.playScrollTick();
 		} else if (!editing) {
-			float next = Math.max(0, Math.min(scroll - amount * 18, maxScroll));
-			if (Math.abs(next - scroll) > 0.5f) {
+			float next = Math.max(0, Math.min(scroll - amount * SCROLL_STEP, maxScroll));
+			if (Math.abs(next - scroll) > 0.01f) {
 				scroll = next;
 				os.playScrollTick();
 			}

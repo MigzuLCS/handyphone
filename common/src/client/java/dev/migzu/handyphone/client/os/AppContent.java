@@ -113,6 +113,25 @@ abstract class AppContent {
 		}
 	}
 
+	/** Áreas clicáveis do último desenho, {x, y, w, h}, por chave, na ordem em que foram registradas (para o destaque da roda). */
+	final java.util.LinkedHashMap<String, float[]> focusTargets() {
+		java.util.LinkedHashMap<String, float[]> out = new java.util.LinkedHashMap<>();
+		for (Hit hit : hits) {
+			out.putIfAbsent(hit.key, new float[] {hit.x, hit.y, hit.w, hit.h});
+		}
+		return out;
+	}
+
+	/** Chave do item que o destaque da roda marca ao abrir esta camada (o principal da tela), ou null para o primeiro item. */
+	String firstFocus() {
+		return null;
+	}
+
+	/** Solta o campo de texto em foco (o celular voltou para a mão: o teclado é do jogo de novo). */
+	final void blur() {
+		focus = null;
+	}
+
 	final void cancelPointer() {
 		pressed = null;
 		pointerReleased();
@@ -146,7 +165,19 @@ abstract class AppContent {
 		return false;
 	}
 
+	/**
+	 * Roda do mouse em "cliques" (positivo = para cima). Com {@link #smoothScroll()} o PhoneOS entrega cada clique aos poucos,
+	 * em frações, ao longo de uns 200 ms: o app só soma {@code amount * SCROLL_STEP} à rolagem e limita.
+	 */
 	void scroll(PhoneOS os, float amount) {
+	}
+
+	/** Pontos da tela rolados por clique da roda (eram 18: uma linha de lista pedia 2 cliques). */
+	static final float SCROLL_STEP = 40f;
+
+	/** A roda rola uma lista (entregue aos poucos, deslizando). Falso quando cada clique é um degrau, como o zoom do Mapa. */
+	boolean smoothScroll() {
+		return true;
 	}
 
 	/** O dedo andou com o botão apertado (arrastar). */

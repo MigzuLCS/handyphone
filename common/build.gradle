@@ -22,6 +22,11 @@ sourceSets {
 		compileClasspath += main.output + main.compileClasspath
 		runtimeClasspath += main.output + main.runtimeClasspath
 	}
+	// Os testes sem jogo também alcançam o PhoneOS (Java2D puro), como o PhoneScrollTest.
+	test {
+		compileClasspath += client.output
+		runtimeClasspath += client.output
+	}
 }
 
 dependencies {

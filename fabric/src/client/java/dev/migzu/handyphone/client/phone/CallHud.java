@@ -10,7 +10,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
  * O aviso de ligação na tela do jogo, fora do aparelho: só um ícone de telefone, sem texto, discreto no canto. Laranja e
- * balançando enquanto uma chamada toca (a tecla U puxa o celular direto na tela de atender), verde com a ligação em andamento,
+ * balançando enquanto uma chamada toca (a tecla Z puxa o celular direto na tela de atender), verde com a ligação em andamento,
  * cinza enquanto se chama. Some quando o celular está na mão (a tela da ligação já mostra tudo). Faz parte da ideia de
  * notificações de HUD do Migzu, só com o ícone de ligação por enquanto.
  */

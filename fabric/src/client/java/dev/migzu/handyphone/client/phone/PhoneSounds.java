@@ -70,9 +70,16 @@ public final class PhoneSounds {
 		return EVENTS.get(HandyPhone.id(sound.eventPath(FALLBACK_THEME)));
 	}
 
+	/** Volume dos sons do celular (Ajustes > Sons), de 0 a 1; multiplica o volume de cada som. */
+	private static volatile float volume = 1f;
+
+	public static void setVolume(float v) {
+		volume = Math.max(0f, Math.min(1f, v));
+	}
+
 	/** Toca um som do aparelho ou da interface na thread do jogo. */
 	public static void play(PhoneSound sound, String themeId) {
-		if (sound == null) {
+		if (sound == null || volume <= 0f) {
 			return;
 		}
 		SoundEvent event = resolve(sound, themeId);
@@ -87,7 +94,7 @@ public final class PhoneSounds {
 			mc.execute(() -> {
 				// Som sem entrada no sounds.json (os call_* chegam em separado): só não toca, sem encher o log.
 				if (mc.getSoundManager().getSoundEvent(event.location()) != null) {
-					mc.getSoundManager().play(SimpleSoundInstance.forUI(event, pitch, 1.0f));
+					mc.getSoundManager().play(SimpleSoundInstance.forUI(event, pitch, volume));
 				}
 			});
 		}
@@ -102,10 +109,10 @@ public final class PhoneSounds {
 		SoundEvent event = sound == null ? null : resolve(sound, themeId);
 		Minecraft mc = Minecraft.getInstance();
 		// Evento sem entrada no sounds.json: o jogo reclamaria no log a cada tentativa, e um laço tentaria para sempre.
-		if (event == null || mc == null || mc.getSoundManager().getSoundEvent(event.location()) == null) {
+		if (event == null || mc == null || volume <= 0f || mc.getSoundManager().getSoundEvent(event.location()) == null) {
 			return null;
 		}
-		SimpleSoundInstance instance = SimpleSoundInstance.forUI(event, 1.0f, 1.0f);
+		SimpleSoundInstance instance = SimpleSoundInstance.forUI(event, 1.0f, volume);
 		mc.getSoundManager().play(instance);
 		return instance;
 	}

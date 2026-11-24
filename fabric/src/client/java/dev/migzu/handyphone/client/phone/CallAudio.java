@@ -39,7 +39,7 @@ public final class CallAudio {
 			lastJoined = 0;
 			return;
 		}
-		String theme = os.themeId();
+		String theme = os.soundThemeId();
 		boolean sounds = os.uiSounds();
 		int state = view.state();
 		// Alguém entrou ou saiu de uma chamada em andamento (a de grupo): um aviso curto. A primeira contagem depois de atender não conta.

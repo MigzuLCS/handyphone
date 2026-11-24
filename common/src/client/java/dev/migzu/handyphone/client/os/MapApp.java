@@ -151,6 +151,12 @@ final class MapApp extends AppContent {
 	}
 
 	@Override
+	boolean smoothScroll() {
+		// No mapa cada clique é um degrau de zoom; as listas (locais, ao vivo, encaminhar) deslizam.
+		return view != View.MAP;
+	}
+
+	@Override
 	void scroll(PhoneOS os, float amount) {
 		switch (view) {
 			case MAP -> {
@@ -161,22 +167,22 @@ final class MapApp extends AppContent {
 				}
 			}
 			case PLACES -> {
-				float next = Math.max(0, Math.min(placesScroll - amount * 18, placesMax));
-				if (Math.abs(next - placesScroll) > 0.5f) {
+				float next = Math.max(0, Math.min(placesScroll - amount * SCROLL_STEP, placesMax));
+				if (Math.abs(next - placesScroll) > 0.01f) {
 					placesScroll = next;
 					os.playScrollTick();
 				}
 			}
 			case LIVE -> {
-				float next = Math.max(0, Math.min(liveScroll - amount * 18, liveMax));
-				if (Math.abs(next - liveScroll) > 0.5f) {
+				float next = Math.max(0, Math.min(liveScroll - amount * SCROLL_STEP, liveMax));
+				if (Math.abs(next - liveScroll) > 0.01f) {
 					liveScroll = next;
 					os.playScrollTick();
 				}
 			}
 			case SHARE_PLACE -> {
-				float next = Math.max(0, Math.min(shareScroll - amount * 18, shareMax));
-				if (Math.abs(next - shareScroll) > 0.5f) {
+				float next = Math.max(0, Math.min(shareScroll - amount * SCROLL_STEP, shareMax));
+				if (Math.abs(next - shareScroll) > 0.01f) {
 					shareScroll = next;
 					os.playScrollTick();
 				}

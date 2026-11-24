@@ -66,6 +66,20 @@ final class RetroTheme extends Theme {
 		return Lang.t("handyphone.theme.retro.description");
 	}
 
+	@Override
+	float[] iconBox(PhoneOS os, int i) {
+		if (os.apps.get(i).dock()) {
+			return null; // Na barra de baixo cada app é um botão inteiro (nome e símbolo): a área de toque já é o desenho.
+		}
+		float[] c = iconCenter(os, i);
+		return new float[] {c[0] - SIDE_ICON / 2f, c[1] - SIDE_ICON / 2f, SIDE_ICON, SIDE_ICON, SIDE_ICON * 0.21f};
+	}
+
+	@Override
+	Color accent() {
+		return BLUE_2;
+	}
+
 	// ------------------------------------------------------------------ layout
 
 	/** Área de toque do app i: {x, y, largura, altura}. */
@@ -587,7 +601,7 @@ final class RetroTheme extends Theme {
 		Ui.text(g, app.name(), SX + 27, top + 15.7f);
 
 		float[] body = appBody();
-		if (!os.drawApp(g, app, body, BLUE_2)) {
+		if (!os.drawApp(g, app, body, accent())) {
 			float cx = body[0] + body[2] / 2f;
 			t = g.getTransform();
 			g.translate(cx - 28, body[1] + 44);

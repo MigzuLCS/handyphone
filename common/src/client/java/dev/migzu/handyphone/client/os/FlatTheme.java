@@ -67,6 +67,17 @@ final class FlatTheme extends Theme {
 		return Lang.t("handyphone.theme.flat.description");
 	}
 
+	@Override
+	float[] iconBox(PhoneOS os, int i) {
+		float[] r = iconRect(os, i);
+		return new float[] {r[0], r[1], ICON, ICON, ICON * 0.31f};
+	}
+
+	@Override
+	Color accent() {
+		return COBALT;
+	}
+
 	// ------------------------------------------------------------------ layout
 
 	/** Canto superior esquerdo do ícone i. */
@@ -393,7 +404,7 @@ final class FlatTheme extends Theme {
 		g.fill(new Rectangle2D.Float(SX, top + HEADER_H - 0.7f, SW, 0.7f));
 
 		float[] body = appBody();
-		if (!os.drawApp(g, app, body, COBALT)) {
+		if (!os.drawApp(g, app, body, accent())) {
 			float cx = body[0] + body[2] / 2f;
 			AffineTransform t = g.getTransform();
 			g.translate(cx - 28, body[1] + 52);

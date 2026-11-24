@@ -49,11 +49,36 @@ public class PhoneInputScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(final MouseButtonEvent event, final boolean doubleClick) {
+		// Ajustes > Atalho esperando a nova tecla: um botão do mouse (menos esquerdo e direito) vira a tecla do celular.
+		if (PhoneShortcut.INSTANCE.capture(InputConstants.Type.MOUSE.getOrCreate(event.button()), false)) {
+			return true;
+		}
+		// A tecla do celular pode estar num botão do mouse (lateral, o "jeito GTA"): expandido, ela volta o celular para a mão,
+		// como o Z. Esquerdo e direito ficam com a tela (tocar e voltar).
+		if (event.button() != InputConstants.MOUSE_BUTTON_LEFT && event.button() != InputConstants.MOUSE_BUTTON_RIGHT
+			&& HandyPhoneClient.EXPAND_KEY.matches(InputConstants.Type.MOUSE.getOrCreate(event.button()))) {
+			ctrl.toggleExpanded();
+			return true;
+		}
 		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
-			this.onClose();
+			// Direito volta (como o Esc); na tela inicial, guarda o celular.
+			boolean handled;
+			synchronized (ctrl.os) {
+				handled = ctrl.os.back();
+			}
+			if (!handled) {
+				this.onClose();
+			}
+			syncTextInput();
+			return true;
+		}
+		if (event.button() == InputConstants.MOUSE_BUTTON_MIDDLE) {
+			// Meio: volta para a mão (câmera livre, roda no destaque).
+			ctrl.toggleExpanded();
 			return true;
 		}
 		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+			PhoneCursor.setPressed(true);
 			float[] p = pick(event.x(), event.y());
 			if (p != null) {
 				synchronized (ctrl.os) {
@@ -84,6 +109,7 @@ public class PhoneInputScreen extends Screen {
 	@Override
 	public boolean mouseReleased(final MouseButtonEvent event) {
 		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+			PhoneCursor.setPressed(false);
 			float[] p = pick(event.x(), event.y());
 			synchronized (ctrl.os) {
 				ctrl.os.pointerUp(p != null ? p[0] : -1000f, p != null ? p[1] : -1000f);
@@ -96,6 +122,9 @@ public class PhoneInputScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(final KeyEvent event) {
+		if (PhoneShortcut.INSTANCE.capture(InputConstants.getKey(event), event.isEscape())) {
+			return true;
+		}
 		if (event.isEscape()) {
 			boolean handled;
 			synchronized (ctrl.os) {
@@ -243,11 +272,13 @@ public class PhoneInputScreen extends Screen {
 
 	@Override
 	public void removed() {
+		PhoneShortcut.INSTANCE.cancelCapture();
 		this.minecraft.textInputManager().stopTextInput(this);
 		for (KeyMapping key : movementKeys()) {
 			key.setDown(false);
 		}
-		ctrl.onClosed();
+		PhoneCursor.release();
+		ctrl.onScreenRemoved();
 		super.removed();
 	}
 
