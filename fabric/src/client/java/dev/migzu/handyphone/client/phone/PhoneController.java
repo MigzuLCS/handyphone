@@ -85,6 +85,14 @@ public final class PhoneController {
 			applySettingsToGame();
 		});
 		os.setShortcutKeys(PhoneShortcut.INSTANCE);
+		// A área de transferência do jogo (SDL) só pode ser mexida na thread principal.
+		// Links fixos do app Sobre (Modrinth, CurseForge): só https, abertos na thread principal.
+		os.setLinkOpener(url -> {
+			if (url.startsWith("https://")) {
+				Minecraft.getInstance().execute(() -> com.mojang.blaze3d.Blaze3D.openUri(java.net.URI.create(url)));
+			}
+		});
+		os.setClipboard(text -> Minecraft.getInstance().execute(() -> Minecraft.getInstance().keyboardHandler.setClipboard(text)));
 		os.setModVersion(FabricLoader.getInstance().getModContainer(HandyPhone.MOD_ID)
 			.map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse(""));
 		os.setCamera(PhoneCameraSource.INSTANCE);

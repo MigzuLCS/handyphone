@@ -135,9 +135,12 @@ public class PhoneInputScreen extends Screen {
 			}
 			return true;
 		}
-		// Ctrl+V: cola uma imagem copiada no computador (vai para a galeria). Antes da tecla de expandir, que também é o V.
+		// Ctrl+V: com um campo de texto em uso e texto copiado, cola o texto no campo (um número copiado nos Contatos, por exemplo);
+		// senão, cola uma imagem copiada no computador (vai para a galeria). Antes da tecla de expandir.
 		if (event.isPaste() || (event.key() == InputConstants.KEY_V && event.hasControlDown())) {
-			pasteImage();
+			if (!pasteText()) {
+				pasteImage();
+			}
 			return true;
 		}
 		// Com um campo de texto em uso, o teclado é do celular: nada de andar ou expandir.
@@ -188,6 +191,21 @@ public class PhoneInputScreen extends Screen {
 		synchronized (ctrl.os) {
 			ctrl.os.importFiles(files);
 		}
+	}
+
+	/** Cola o texto da área de transferência no campo em uso (quebras de linha viram espaço; o campo filtra o resto). */
+	private boolean pasteText() {
+		String text = Minecraft.getInstance().keyboardHandler.getClipboard();
+		if (text == null || text.isBlank()) {
+			return false;
+		}
+		synchronized (ctrl.os) {
+			if (!ctrl.os.wantsKeyboard()) {
+				return false;
+			}
+			ctrl.os.typed(text.strip().replaceAll("\\s*[\\r\\n]+\\s*", " "));
+		}
+		return true;
 	}
 
 	private void pasteImage() {

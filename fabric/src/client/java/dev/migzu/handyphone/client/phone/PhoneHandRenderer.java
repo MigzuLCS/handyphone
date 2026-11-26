@@ -44,6 +44,18 @@ public final class PhoneHandRenderer {
 
 	/** Giro extra em Y (graus), usado só pelo teste automático para fotografar a lateral e a traseira. */
 	public static volatile float debugYaw;
+	/** Esconde o destaque da roda; só o teste automático usa, para comparar o quadro com e sem ele. */
+	public static volatile boolean debugHideFocus;
+
+	/**
+	 * Ordem de desenho das camadas do aparelho ({@code collector.order}). Corpo, tela, destaque e cursor usam todos o pipeline
+	 * translúcido de texto, e dentro de uma mesma ordem o jogo agrupa os desenhos por {@code RenderType} num HashMap
+	 * ({@code SimpleFeatureRenderPhase}) cujo hash é o de identidade: a ordem entre os grupos muda a cada vez que o jogo abre. Quando o
+	 * destaque saía antes da tela, ele gravava profundidade, a tela não era pintada embaixo dele e o brilho translúcido se misturava
+	 * com o corpo escuro do aparelho: um contorno cinza em volta do item que aparecia em umas aberturas e não em outras. Com ordens
+	 * diferentes a sequência é fixa (o jogo desenha a ordem 0 inteira, depois a 1...): corpo, tela, destaque, cursor.
+	 */
+	private static final int ORDER_BODY = 0, ORDER_SCREEN = 1, ORDER_FOCUS = 2, ORDER_CURSOR = 3;
 
 	// Pose: {x, y, z, rotY, rotX, rotZ, altura}. x e as rotações em Y/Z são espelhados para canhotos.
 	private static final float[] IDLE = {0.50f, -0.33f, -0.62f, -20f, -14f, 5f, 0.40f};
@@ -135,7 +147,7 @@ public final class PhoneHandRenderer {
 		// A pilha de poses da mão ainda não inclui a rotação da câmera; as normais precisam dela.
 		Matrix3f viewNormal = new Matrix3f(viewRot);
 		// Corpo: malha sólida, sombreada pela normal de cada vértice.
-		collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
+		collector.order(ORDER_BODY).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
 			for (PhoneMesh.Part part : MESH.parts) {
 				solid(viewNormal, pose, buffer, part.quads(), part.color(), lightCoords);
 			}
@@ -143,14 +155,15 @@ public final class PhoneHandRenderer {
 		float hw = ASPECT / 2f;
 		// Traseira (imagem espelhada, pois é vista pelo outro lado) e tela.
 		float backZ = -PhoneMesh.THICKNESS - SURFACE_GAP;
-		collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BACK_TEXTURE), (pose, buffer) -> {
+		collector.order(ORDER_BODY).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BACK_TEXTURE), (pose, buffer) -> {
 			int color = shade(viewNormal, pose, 0f, 0f, -1f, 0xFFFFFF);
 			buffer.addVertex(pose, hw, -0.5f, backZ).setColor(color).setUv(0f, 1f).setLight(lightCoords);
 			buffer.addVertex(pose, -hw, -0.5f, backZ).setColor(color).setUv(1f, 1f).setLight(lightCoords);
 			buffer.addVertex(pose, -hw, 0.5f, backZ).setColor(color).setUv(1f, 0f).setLight(lightCoords);
 			buffer.addVertex(pose, hw, 0.5f, backZ).setColor(color).setUv(0f, 0f).setLight(lightCoords);
 		});
-		collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.SCREEN_TEXTURE), (pose, buffer) -> {
+		// A tela depois do corpo: os cantos arredondados da imagem são semitransparentes e precisam do corpo já desenhado embaixo.
+		collector.order(ORDER_SCREEN).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.SCREEN_TEXTURE), (pose, buffer) -> {
 			int light = LightCoordsUtil.FULL_BRIGHT;
 			buffer.addVertex(pose, -hw, -0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(0f, 1f).setLight(light);
 			buffer.addVertex(pose, hw, -0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(1f, 1f).setLight(light);
@@ -161,7 +174,7 @@ public final class PhoneHandRenderer {
 		PhoneOS.FocusShape focus = ctrl.inHand() ? ctrl.os.focusShape() : null;
 		if (focus != null) {
 			PhoneSettings settings = ctrl.os.settings();
-			collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE),
+			if (!debugHideFocus) collector.order(ORDER_FOCUS).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE),
 				(pose, buffer) -> PhoneFocusRing.submit(pose, buffer, focus, settings, hw, SURFACE_GAP * 2f, LightCoordsUtil.FULL_BRIGHT));
 		} else {
 			PhoneFocusRing.reset();
@@ -184,7 +197,7 @@ public final class PhoneHandRenderer {
 		float arm = CURSOR_ARM * unit * scale;
 		float thick = CURSOR_THICK * unit;
 		float outline = CURSOR_OUTLINE * unit;
-		collector.submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
+		collector.order(ORDER_CURSOR).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
 			int light = LightCoordsUtil.FULL_BRIGHT;
 			cross(pose, buffer, cx, cy, arm + outline, thick + outline, SURFACE_GAP * 2f, CURSOR_OUTLINE_COLOR, light);
 			cross(pose, buffer, cx, cy, arm, thick, SURFACE_GAP * 3f, CURSOR_COLOR, light);

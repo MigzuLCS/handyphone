@@ -118,6 +118,9 @@ final class ContactsApp extends AppContent {
 		g.setColor(Color.WHITE);
 		g.setFont(Ui.font(Font.BOLD, 15f));
 		Ui.text(g, os.data.number.isEmpty() ? Lang.t("handyphone.contacts.no_signal") : PhoneData.formatNumber(os.data.number), rx + 8, y + 38);
+		if (!os.data.number.isEmpty()) {
+			copyButton(g, os, rx + rw - 30, y + 13, 24);
+		}
 
 		button(g, "add", Lang.t("handyphone.contacts.add"), rx, y + 50, rw, 20, Ui.shade(accent, 0.85f), () -> edit(os, null, ""));
 		button(g, "blocked", Lang.t("handyphone.contacts.blocked_button", Integer.toString(os.data.blocked.size())), rx, y + 74, rw, 18, new Color(0x8E8E98), () -> {
@@ -163,6 +166,32 @@ final class ContactsApp extends AppContent {
 			Ui.centered(g, Lang.t("handyphone.contacts.edit_tag"), rx + rw - 17, ry + ROW_H / 2f + 1.5f);
 		}
 		g.setClip(oldClip);
+	}
+
+	/** Botão de copiar o próprio número (dois cartões sobrepostos), no canto direito do cartão. */
+	private void copyButton(Graphics2D g, PhoneOS os, float x, float y, float size) {
+		String formatted = PhoneData.formatNumber(os.data.number);
+		boolean down = hit("copy_number", x, y, size, size, PhoneSound.BUTTON, () -> {
+			os.copyText(formatted);
+			os.notify(Lang.t("handyphone.app.contacts"), Lang.t("handyphone.contacts.number_copied", formatted), -1);
+		});
+		g.setColor(new Color(255, 255, 255, down ? 90 : 45));
+		g.fill(new RoundRectangle2D.Float(x, y, size, size, 8, 8));
+		java.awt.Stroke oldStroke = g.getStroke();
+		g.setStroke(new java.awt.BasicStroke(1.3f, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
+		g.setColor(Color.WHITE);
+		float s = size * 0.36f, cx = x + size / 2f, cy = y + size / 2f;
+		// Cartão de trás (só a parte que aparece) e o da frente.
+		g.draw(new java.awt.geom.Path2D.Float() {
+			{
+				moveTo(cx - s / 2f - 2.2f, cy + s / 2f - 2.2f);
+				lineTo(cx - s / 2f - 2.2f, cy - s / 2f - 2.2f + 1.6f);
+				quadTo(cx - s / 2f - 2.2f, cy - s / 2f - 2.2f, cx - s / 2f - 2.2f + 1.6f, cy - s / 2f - 2.2f);
+				lineTo(cx + s / 2f - 2.2f, cy - s / 2f - 2.2f);
+			}
+		});
+		g.draw(new RoundRectangle2D.Float(cx - s / 2f + 1.1f, cy - s / 2f + 1.1f, s, s, 3, 3));
+		g.setStroke(oldStroke);
 	}
 
 	/** Os números bloqueados, cada um com o botão de desbloquear. */

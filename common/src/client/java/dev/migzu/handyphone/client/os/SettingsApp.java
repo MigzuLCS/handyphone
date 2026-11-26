@@ -17,7 +17,7 @@ import java.util.function.IntConsumer;
  * {@link PhoneSettings} e mudam por {@link PhoneOS#changeSettings}, que salva.
  */
 final class SettingsApp extends AppContent {
-	enum Page { MAIN, APPEARANCE, NAVIGATION, SOUNDS, NOTIFICATIONS, SHORTCUT, ABOUT }
+	enum Page { MAIN, APPEARANCE, NAVIGATION, SOUNDS, NOTIFICATIONS, SHORTCUT }
 
 	/** Cores de destaque que o jogador pode escolher (além de "automática" = a cor de cada app). */
 	static final int[] ACCENTS = {0xFF7A1A, 0xEF4444, 0xEC4899, 0x8B5CF6, 0x3B82F6, 0x06B6D4, 0x22C55E, 0xEAB308};
@@ -122,7 +122,6 @@ final class SettingsApp extends AppContent {
 			case SOUNDS -> drawSounds(g, os, rx, cy, rw, accent);
 			case NOTIFICATIONS -> drawNotifications(g, os, rx, cy, rw, accent);
 			case SHORTCUT -> drawShortcut(g, os, rx, cy, rw, accent);
-			case ABOUT -> drawAbout(g, os, rx, cy, rw);
 		};
 		maxScroll = Math.max(0, end + scroll + 6f - top - viewH);
 		scroll = Math.max(0, Math.min(scroll, maxScroll));
@@ -136,7 +135,6 @@ final class SettingsApp extends AppContent {
 			case SOUNDS -> Lang.t("handyphone.settings.section.sounds");
 			case NOTIFICATIONS -> Lang.t("handyphone.settings.section.notifications");
 			case SHORTCUT -> Lang.t("handyphone.settings.section.shortcut");
-			case ABOUT -> Lang.t("handyphone.settings.section.about");
 			case MAIN -> "";
 		};
 	}
@@ -178,7 +176,6 @@ final class SettingsApp extends AppContent {
 			{Page.SOUNDS, 0xEC4899, sounds},
 			{Page.NOTIFICATIONS, 0xEF4444, notif},
 			{Page.SHORTCUT, 0x64748B, os.useKeyName()},
-			{Page.ABOUT, 0x8B5CF6, os.modVersion().isEmpty() ? "HandyPhone" : Lang.t("handyphone.settings.about.version", os.modVersion())},
 		};
 		float ry = y + 2f;
 		for (Object[] row : rows) {
@@ -471,25 +468,6 @@ final class SettingsApp extends AppContent {
 		return ry;
 	}
 
-	private float drawAbout(Graphics2D g, PhoneOS os, float rx, float y, float rw) {
-		float ry = y + 14f;
-		g.setColor(INK);
-		g.setFont(Ui.font(Font.BOLD, 12f));
-		Ui.centered(g, "Migzu's HandyPhone", rx + rw / 2f, ry);
-		ry += 13f;
-		g.setColor(MUTED);
-		g.setFont(Ui.font(Font.PLAIN, 8f));
-		if (!os.modVersion().isEmpty()) {
-			Ui.centered(g, Lang.t("handyphone.settings.about.version", os.modVersion()), rx + rw / 2f, ry);
-			ry += 11f;
-		}
-		Ui.centered(g, fit(g, Lang.t("handyphone.settings.about.author"), rw), rx + rw / 2f, ry);
-		ry += 18f;
-		g.setFont(Ui.font(Font.PLAIN, 7.2f));
-		Ui.centered(g, fit(g, Lang.t("handyphone.settings.about.font"), rw), rx + rw / 2f, ry);
-		return ry + 6f;
-	}
-
 	// ------------------------------------------------------------------ peças
 
 	private static String percent(int v) {
@@ -594,10 +572,6 @@ final class SettingsApp extends AppContent {
 			case SHORTCUT -> {
 				g.draw(new RoundRectangle2D.Float(cx - 5f, cy - 4f, 10f, 8f, 3f, 3f));
 				g.fill(new java.awt.geom.Rectangle2D.Float(cx - 2.5f, cy + 0.6f, 5f, 1.3f));
-			}
-			case ABOUT -> {
-				g.fill(new Ellipse2D.Float(cx - 1f, cy - 4.8f, 2f, 2f));
-				g.fill(new RoundRectangle2D.Float(cx - 1f, cy - 1.6f, 2f, 6.4f, 1.5f, 1.5f));
 			}
 			case MAIN -> { }
 		}

@@ -85,7 +85,7 @@ public final class PhoneOS {
 	/** Apps que já têm conteúdo de verdade; os outros mostram "Em breve". */
 	private final Map<String, AppContent> contents = Map.of(
 		"settings", new SettingsApp(), "messages", messages, "contacts", contacts, "camera", new CameraApp(), "gallery", gallery, "map", map,
-		"phone", phone
+		"phone", phone, "about", new AboutApp()
 	);
 
 	/** Reduzir e comprimir imagem custa CPU: nunca na thread de desenho nem na do jogo. */
@@ -369,6 +369,34 @@ public final class PhoneOS {
 	private Color accentColor;
 	private ShortcutKeys shortcutKeys = ShortcutKeys.NONE;
 	private volatile String modVersion = "";
+
+	/** Área de transferência do computador (no jogo, a do Minecraft); sem jogo, nada. */
+	private volatile java.util.function.Consumer<String> clipboard = text -> {
+	};
+
+	public void setClipboard(java.util.function.Consumer<String> clipboard) {
+		this.clipboard = clipboard == null ? text -> {
+		} : clipboard;
+	}
+
+	/** Abre um endereço no navegador do computador (no jogo, pelo Minecraft); sem jogo, nada. */
+	private volatile java.util.function.Consumer<String> linkOpener = url -> {
+	};
+
+	public void setLinkOpener(java.util.function.Consumer<String> opener) {
+		this.linkOpener = opener == null ? url -> {
+		} : opener;
+	}
+
+	/** Só para endereços fixos do próprio celular (o app Sobre), nunca texto vindo de mensagens ou do servidor. */
+	void openLink(String url) {
+		linkOpener.accept(url);
+	}
+
+	/** Copia um texto para a área de transferência do computador (para colar no chat do jogo ou no celular de outro jogador). */
+	void copyText(String text) {
+		clipboard.accept(text);
+	}
 
 	public void setShortcutKeys(ShortcutKeys keys) {
 		shortcutKeys = keys == null ? ShortcutKeys.NONE : keys;
