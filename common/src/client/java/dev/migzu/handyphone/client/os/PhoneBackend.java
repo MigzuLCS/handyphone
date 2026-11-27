@@ -47,6 +47,15 @@ public interface PhoneBackend {
 	/** Apaga uma foto da galeria. */
 	void deletePhoto(long id);
 
+	/** Pede as informações de uma foto (1.3). Servidor antigo: nada (o celular mostra só o que já sabe). */
+	default void requestPhotoInfo(long id) {
+	}
+
+	/** Apaga várias fotos da galeria (seleção). Sem suporte do servidor, uma a uma. */
+	default void deletePhotos(List<Long> ids) {
+		ids.forEach(this::deletePhoto);
+	}
+
 	/** Manda, em uma conversa, uma foto da galeria. */
 	void sendPhoto(long conversation, long photo);
 

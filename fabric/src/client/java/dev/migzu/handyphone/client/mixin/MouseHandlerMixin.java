@@ -5,6 +5,10 @@ import dev.migzu.handyphone.client.phone.PhoneController;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.MouseHandler;
 import net.minecraft.client.input.MouseButtonInfo;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import dev.migzu.handyphone.client.phone.PhoneLens;
+import net.minecraft.client.player.LocalPlayer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -29,5 +33,12 @@ public abstract class MouseHandlerMixin {
 			&& PhoneController.INSTANCE.handButton(info.button(), action == InputConstants.PRESS)) {
 			ci.cancel();
 		}
+	}
+
+	/** Zoom da Câmera (1.3): o mouse gira mais devagar na mesma proporção, como na luneta (senão a 4x a mira pula). */
+	@WrapOperation(method = "turnPlayer", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;turn(DD)V"))
+	private void handyphone$zoomTurn(final LocalPlayer player, final double yaw, final double pitch, final Operation<Void> original) {
+		float zoom = PhoneLens.zoom();
+		original.call(player, yaw / zoom, pitch / zoom);
 	}
 }

@@ -12,13 +12,54 @@ import java.awt.image.BufferedImage;
 import java.io.InputStream;
 import javax.imageio.ImageIO;
 
-/** App Sobre: o ícone do mod, o nome, a versão, os créditos e os links das páginas do mod (Modrinth e CurseForge). */
+/**
+ * App Sobre: o ícone do mod, o nome, a versão, os créditos, os links das páginas do mod (Modrinth e CurseForge) e a linha que abre a
+ * página Apoiadores ({@link SupportersPage}; fica aqui e não na tela inicial para não atrapalhar a navegação, decisão do Migzu em 2026-11-26).
+ */
 final class AboutApp extends AppContent {
 	private static final float MARGIN = 10f, ICON = 58f, ROW_H = 22f;
 	private static final String MODRINTH = "https://modrinth.com/mod/handyphone";
 	private static final String CURSEFORGE = "https://www.curseforge.com/minecraft/mc-mods/handyphone";
 	private static BufferedImage icon;
 	private static boolean iconTried;
+	private static final float HEADER_H = 22f;
+	private final SupportersPage supporters = new SupportersPage();
+	private boolean onSupporters;
+
+	/** A página Apoiadores está aberta (para os testes). */
+	boolean onSupporters() {
+		return onSupporters;
+	}
+
+	SupportersPage supporters() {
+		return supporters;
+	}
+
+	@Override
+	void opened(PhoneOS os) {
+		onSupporters = false;
+	}
+
+	@Override
+	boolean back(PhoneOS os) {
+		if (onSupporters) {
+			onSupporters = false;
+			return true;
+		}
+		return false;
+	}
+
+	@Override
+	void scroll(PhoneOS os, float amount) {
+		if (onSupporters) {
+			supporters.scroll(os, amount);
+		}
+	}
+
+	@Override
+	String firstFocus() {
+		return onSupporters ? supporters.firstFocus() : null;
+	}
 
 	private static BufferedImage icon() {
 		if (!iconTried) {
@@ -34,6 +75,14 @@ final class AboutApp extends AppContent {
 
 	@Override
 	void draw(Graphics2D g, PhoneOS os, float x, float y, float w, float h, Color accent) {
+		if (onSupporters) {
+			header(g, os, x + MARGIN, y, w - 2 * MARGIN, Lang.t("handyphone.app.supporters"));
+			java.awt.Shape oldClip = g.getClip();
+			g.clip(new java.awt.geom.Rectangle2D.Float(x, y + HEADER_H, w, h - HEADER_H));
+			supporters.draw(g, this, os, x, y + HEADER_H, w, h - HEADER_H, accent);
+			g.setClip(oldClip);
+			return;
+		}
 		float cx = x + w / 2f, ry = y + 22f;
 		BufferedImage img = icon();
 		if (img != null) {
@@ -104,5 +153,47 @@ final class AboutApp extends AppContent {
 				g.draw(tip);
 			}
 		}
+		// Apoiadores: uma linha à parte, que abre a página com a lista.
+		float sy = top + rows.length * ROW_H + 8f;
+		boolean down = hit("supporters", rx, sy, rw, ROW_H + 2f, PhoneSound.LIST_ITEM, () -> {
+			supporters.reset();
+			onSupporters = true;
+		});
+		g.setColor(down ? PRESSED : Color.WHITE);
+		g.fill(new RoundRectangle2D.Float(rx, sy, rw, ROW_H + 2f, 10, 10));
+		SupportersPage.heart(g, rx + 13f, sy + (ROW_H + 2f) / 2f, 10f, SupportersPage.HEART);
+		g.setColor(INK);
+		g.setFont(Ui.font(Font.BOLD, 8.6f));
+		Ui.text(g, fit(g, Lang.t("handyphone.app.supporters"), rw - 40), rx + 23f, sy + (ROW_H + 2f) / 2f + 3f);
+		g.setColor(new Color(0xA9ABB5));
+		g.setStroke(new BasicStroke(1.3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		float chx = rx + rw - 11, chy = sy + (ROW_H + 2f) / 2f;
+		GeneralPath chev = new GeneralPath();
+		chev.moveTo(chx - 2, chy - 4);
+		chev.lineTo(chx + 2, chy);
+		chev.lineTo(chx - 2, chy + 4);
+		g.draw(chev);
+	}
+
+	/** Cabeçalho da página Apoiadores: seta de voltar (ao Sobre) e o nome. */
+	private void header(Graphics2D g, PhoneOS os, float rx, float y, float rw, String title) {
+		boolean down = hit("about:back", rx - 4, y, 26, HEADER_H, PhoneSound.BUTTON, () -> {
+			back(os);
+			os.navigatedBack();
+		});
+		g.setColor(down ? MUTED : INK);
+		g.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		float cy = y + HEADER_H / 2f + 1f;
+		GeneralPath chev = new GeneralPath();
+		chev.moveTo(rx + 6, cy - 5);
+		chev.lineTo(rx + 1.5f, cy);
+		chev.lineTo(rx + 6, cy + 5);
+		g.draw(chev);
+		g.setColor(INK);
+		g.setFont(Ui.font(Font.BOLD, 10.5f));
+		Ui.text(g, fit(g, title, rw - 20), rx + 13, cy + 3.6f);
+		g.setColor(LINE);
+		g.setStroke(new BasicStroke(0.6f));
+		g.draw(new Line2D.Float(rx, y + HEADER_H - 0.5f, rx + rw, y + HEADER_H - 0.5f));
 	}
 }

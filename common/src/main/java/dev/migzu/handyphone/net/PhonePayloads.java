@@ -60,6 +60,16 @@ public final class PhonePayloads {
 	/** Participantes de uma ligação que cabem em um pacote (o teto real é {@code maxCallParticipants}). */
 	public static final int MAX_CALL_PARTS = 32;
 
+	/**
+	 * Celular visto de fora (1.3): o que o jogador está fazendo com ele. Nada da tela viaja, só isto e o tema (índice na lista fixa de
+	 * temas do celular, que o servidor não conhece pelo nome).
+	 */
+	public static final int POSE_NONE = 0, POSE_USE = 1, POSE_CAMERA = 2, POSE_SELFIE = 3;
+	/** Maior pose aceita e quantos temas existem (valor fora vira o padrão). */
+	public static final int MAX_POSE = 3, POSE_THEMES = 4;
+	/** Poses por pacote que o servidor manda (a leitura aceita o teto geral de listas). */
+	public static final int MAX_POSES = 256;
+
 	private PhonePayloads() {
 	}
 
@@ -757,6 +767,84 @@ public final class PhonePayloads {
 		}
 	}
 
+	/** Pede as informações de uma foto (1.3): só responde a quem pode vê-la. */
+	public record PhotoInfoGet(long id) implements Payload {
+		public static final PacketType<PhotoInfoGet> TYPE = PacketType.of("photo_info_get", PhotoInfoGet::new);
+
+		private PhotoInfoGet(PhoneBuf buf) {
+			this(buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(id);
+		}
+
+		@Override
+		public PacketType<PhotoInfoGet> type() {
+			return TYPE;
+		}
+	}
+
+	/**
+	 * Informações de uma foto (1.3): quando foi guardada, tamanho, se veio do computador e, só para o dono e só de fotos da câmera, onde
+	 * foi tirada (dimensão vazia = sem local). Quem recebeu a foto numa conversa nunca vê o local.
+	 */
+	public record PhotoInfo(long id, long time, int width, int height, int size, boolean imported, String dimension, int x, int y, int z)
+		implements Payload {
+		public static final PacketType<PhotoInfo> TYPE = PacketType.of("photo_info", PhotoInfo::new);
+
+		private PhotoInfo(PhoneBuf buf) {
+			this(buf.readVarLong(), buf.readLong(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readBoolean(), buf.readUtf(MAX_DIMENSION),
+				buf.readInt(), buf.readInt(), buf.readInt());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(id);
+			buf.writeLong(time);
+			buf.writeVarInt(width);
+			buf.writeVarInt(height);
+			buf.writeVarInt(size);
+			buf.writeBoolean(imported);
+			buf.writeUtf(dimension, MAX_DIMENSION);
+			buf.writeInt(x);
+			buf.writeInt(y);
+			buf.writeInt(z);
+		}
+
+		@Override
+		public PacketType<PhotoInfo> type() {
+			return TYPE;
+		}
+	}
+
+	/** Quantas fotos um {@link PhotoDeleteMany} leva no máximo (a galeria tem até {@link #MAX_GALLERY}: até 5 pacotes). */
+	public static final int MAX_DELETE_MANY = 100;
+
+	/** Apaga várias fotos da própria galeria de uma vez (1.3; seleção na Galeria). Servidor antigo sem o canal: o cliente manda uma a uma. */
+	public record PhotoDeleteMany(List<Long> ids) implements Payload {
+		public static final PacketType<PhotoDeleteMany> TYPE = PacketType.of("photo_delete_many", PhotoDeleteMany::new);
+
+		public PhotoDeleteMany {
+			ids = List.copyOf(ids);
+		}
+
+		private PhotoDeleteMany(PhoneBuf buf) {
+			this(readList(buf, PhoneBuf::readVarLong));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			writeList(buf, ids, PhoneBuf::writeVarLong);
+		}
+
+		@Override
+		public PacketType<PhotoDeleteMany> type() {
+			return TYPE;
+		}
+	}
+
 	/** Manda, em uma conversa, uma foto que está na galeria do jogador. */
 	public record SendPhoto(long conversation, long photo) implements Payload {
 		public static final PacketType<SendPhoto> TYPE = PacketType.of("send_photo", SendPhoto::new);
@@ -1320,6 +1408,56 @@ public final class PhonePayloads {
 
 	// ------------------------------------------------------------------ registro
 
+	// ------------------------------------------------------------------ celular visto de fora (1.3)
+
+	/** O que o celular deste jogador está fazendo agora (pose e tema), para os outros verem. Só muda quando algo muda. */
+	public record PhonePose(int pose, int theme) implements Payload {
+		public static final PacketType<PhonePose> TYPE = PacketType.of("phone_pose", PhonePose::new);
+
+		private PhonePose(PhoneBuf buf) {
+			this(buf.readVarInt(), buf.readVarInt());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarInt(pose);
+			buf.writeVarInt(theme);
+		}
+
+		@Override
+		public PacketType<PhonePose> type() {
+			return TYPE;
+		}
+	}
+
+	/** A pose do celular de um jogador (UUID em duas metades); {@link #POSE_NONE} = guardou ou saiu do alcance. */
+	public record PoseEntry(long uuidHigh, long uuidLow, int pose, int theme) {
+	}
+
+	/** Mudanças nas poses dos jogadores perto de quem recebe (só as que mudaram desde o último envio). */
+	public record PhonePoses(List<PoseEntry> entries) implements Payload {
+		public static final PacketType<PhonePoses> TYPE = PacketType.of("phone_poses", PhonePoses::new);
+
+		private PhonePoses(PhoneBuf buf) {
+			this(readList(buf, b -> new PoseEntry(b.readLong(), b.readLong(), b.readVarInt(), b.readVarInt())));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			writeList(buf, entries, (b, e) -> {
+				b.writeLong(e.uuidHigh());
+				b.writeLong(e.uuidLow());
+				b.writeVarInt(e.pose());
+				b.writeVarInt(e.theme());
+			});
+		}
+
+		@Override
+		public PacketType<PhonePoses> type() {
+			return TYPE;
+		}
+	}
+
 	/** Pacotes do servidor para o celular, na ordem em que a plataforma os registra. */
 	public static final List<PacketType<?>> TO_CLIENT = List.of(
 		Sync.TYPE,
@@ -1339,7 +1477,9 @@ public final class PhonePayloads {
 		Places.TYPE,
 		CallInfo.TYPE,
 		CallUpdate.TYPE,
-		CallLog.TYPE
+		CallLog.TYPE,
+		PhonePoses.TYPE,
+		PhotoInfo.TYPE
 	);
 
 	/** Pacotes do celular para o servidor, na ordem em que a plataforma os registra. */
@@ -1372,7 +1512,10 @@ public final class PhonePayloads {
 		CallGroup.TYPE,
 		CallAnswer.TYPE,
 		CallDecline.TYPE,
-		CallMute.TYPE
+		CallMute.TYPE,
+		PhonePose.TYPE,
+		PhotoDeleteMany.TYPE,
+		PhotoInfoGet.TYPE
 	);
 
 	/** Um pacote do celular: sabe o próprio tipo e se escreve no formato do jogo. */

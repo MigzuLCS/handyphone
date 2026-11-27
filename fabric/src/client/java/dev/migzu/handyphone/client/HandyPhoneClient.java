@@ -6,6 +6,7 @@ import dev.migzu.handyphone.client.net.PhoneClientNet;
 import dev.migzu.handyphone.client.phone.CallAudio;
 import dev.migzu.handyphone.client.phone.CallHud;
 import dev.migzu.handyphone.client.phone.PhoneHintHud;
+import dev.migzu.handyphone.client.phone.PhoneWorldModel;
 import dev.migzu.handyphone.client.phone.KeyConflictNotice;
 import dev.migzu.handyphone.client.phone.PhoneCameraSource;
 import dev.migzu.handyphone.client.phone.LocationTracker;
@@ -46,6 +47,7 @@ public class HandyPhoneClient implements ClientModInitializer {
 		RouteBeam.register();
 		CallHud.register();
 		PhoneHintHud.register();
+		PhoneWorldModel.register();
 		// Tecla do celular presa a outro mapeamento (de outro mod, quase sempre): avisa no chat, uma vez por combinação.
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) -> KeyConflictNotice.onJoin());
 
@@ -54,6 +56,8 @@ public class HandyPhoneClient implements ClientModInitializer {
 			PhoneCameraSource.INSTANCE.tick();
 			LocationTracker.tick(mc);
 			CallAudio.tick(mc);
+			PhoneWorldModel.tick(mc);
+			dev.migzu.handyphone.client.phone.PhoneLens.tick(mc);
 			KeyConflictNotice.tick(mc);
 			// Sem tela aberta, a tecla puxa o celular para a mão (câmera livre, roda no destaque) ou, já na mão, o guarda.
 			// Expandido, a tecla chega à tela de entrada (PhoneInputScreen), que volta o celular para a mão.

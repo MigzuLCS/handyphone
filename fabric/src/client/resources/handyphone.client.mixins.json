@@ -2,7 +2,7 @@
 	"required": true,
 	"package": "dev.migzu.handyphone.client.mixin",
 	"compatibilityLevel": "JAVA_25",
-	"client": ["FirstPersonHandsMixin", "GameRendererMixin", "HudMixin", "MinecraftMixin", "MouseHandlerMixin"],
+	"client": ["AvatarRenderStateMixin", "AvatarRendererMixin", "CameraSelfieMixin", "FieldOfViewMixin", "FirstPersonHandsMixin", "GameRendererBobAccessor", "GameRendererMixin", "HudMixin", "HumanoidModelMixin", "MinecraftMixin", "MouseHandlerMixin", "PlayerItemInHandLayerMixin"],
 	"injectors": { "defaultRequire": 1 },
 	"overwrites": { "requireAnnotations": true }
 }

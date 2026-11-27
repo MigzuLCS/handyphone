@@ -55,6 +55,16 @@ final class PhotoStore {
 		int height;
 		/** O cliente declarou que veio de um arquivo do computador (não é garantia; serve para auditoria). */
 		boolean imported;
+		/**
+		 * Apagada pelo dono, mas ainda enviada em alguma conversa (1.3): sai da galeria dele e não conta no espaço dele; o arquivo fica
+		 * para quem recebeu, até nenhuma conversa usá-la. Conta no total do servidor. Índice antigo sem o campo = visível.
+		 */
+		boolean hidden;
+		/** Onde a foto foi tirada (1.3; só fotos da câmera): dimensão (null = sem local, inclusive fotos antigas) e o bloco do jogador. */
+		String dim;
+		int x;
+		int y;
+		int z;
 
 		long bytes() {
 			return (long) size + thumbSize;
@@ -69,6 +79,8 @@ final class PhotoStore {
 	private final Map<Long, Photo> byId = new HashMap<>();
 	private final Map<UUID, Map<Long, Photo>> byOwner = new HashMap<>();
 	private final Map<UUID, Long> used = new HashMap<>();
+	/** Bytes das fotos apagadas pelo dono que seguem em conversas, por dono. */
+	private final Map<UUID, Long> hiddenUsed = new HashMap<>();
 	private long total;
 	private final List<Path> pendingDeletes = new ArrayList<>();
 	/** Maior id visto em disco (índices e arquivos), para nunca reaproveitar um id depois de uma queda. */
@@ -88,17 +100,75 @@ final class PhotoStore {
 		return byId.get(id);
 	}
 
-	/** Fotos de um jogador, da mais recente para a mais antiga. */
+	/** Fotos da galeria de um jogador (sem as que ele apagou), da mais recente para a mais antiga. */
 	List<Photo> gallery(UUID owner) {
+		List<Photo> list = all(owner);
+		list.removeIf(p -> p.hidden);
+		return list;
+	}
+
+	/** Todas as fotos de um jogador, também as apagadas que seguem em conversas (moderação), da mais recente para a mais antiga. */
+	List<Photo> all(UUID owner) {
 		Map<Long, Photo> mine = byOwner.get(owner);
 		List<Photo> list = mine == null ? new ArrayList<>() : new ArrayList<>(mine.values());
 		list.sort((a, b) -> Long.compare(b.id, a.id));
 		return list;
 	}
 
+	/** Fotos na galeria do jogador (as apagadas não contam). */
 	int count(UUID owner) {
 		Map<Long, Photo> mine = byOwner.get(owner);
-		return mine == null ? 0 : mine.size();
+		if (mine == null) {
+			return 0;
+		}
+		int n = 0;
+		for (Photo p : mine.values()) {
+			if (!p.hidden) {
+				n++;
+			}
+		}
+		return n;
+	}
+
+	/** Fotos apagadas pelo dono que ainda estão no índice (esperando as conversas largarem). */
+	List<Photo> hiddenPhotos() {
+		List<Photo> list = new ArrayList<>();
+		for (Photo p : byId.values()) {
+			if (p.hidden) {
+				list.add(p);
+			}
+		}
+		return list;
+	}
+
+	/**
+	 * Tira a foto da galeria do dono e do espaço dele, mantendo o arquivo (ainda está numa conversa). Com {@code write} falso, o índice
+	 * só é gravado depois, por {@link #flushIndex} (apagar várias de uma vez grava uma vez só).
+	 */
+	void hide(Photo photo, boolean write) {
+		if (photo.hidden) {
+			return;
+		}
+		photo.hidden = true;
+		used.merge(photo.owner, -photo.bytes(), Long::sum);
+		hiddenUsed.merge(photo.owner, photo.bytes(), Long::sum);
+		if (write) {
+			flushIndex(photo.owner);
+		}
+	}
+
+	/** Bytes das fotos que o jogador apagou mas que seguem em conversas (têm um teto próprio: ver PhoneService.spaceError). */
+	long hiddenBytes(UUID owner) {
+		return hiddenUsed.getOrDefault(owner, 0L);
+	}
+
+	/** Grava o índice de um dono (depois de várias mudanças com {@code write} falso). */
+	void flushIndex(UUID owner) {
+		try {
+			writeIndex(owner);
+		} catch (IOException | RuntimeException e) {
+			HandyPhoneCore.LOGGER.error("Couldn't write the photo index of {}", owner, e);
+		}
 	}
 
 	/** Bytes (fotos + miniaturas) que o jogador ocupa. */
@@ -142,7 +212,8 @@ final class PhotoStore {
 	}
 
 	/** Registra no índice uma foto cujos arquivos já foram gravados. Em caso de erro nada fica registrado. */
-	Photo register(long id, UUID owner, int format, int size, int thumbSize, int width, int height, boolean imported) throws IOException {
+	Photo register(long id, UUID owner, int format, int size, int thumbSize, int width, int height, boolean imported, String dim, int x, int y, int z)
+		throws IOException {
 		Photo photo = new Photo();
 		photo.id = id;
 		photo.owner = owner;
@@ -153,6 +224,10 @@ final class PhotoStore {
 		photo.width = width;
 		photo.height = height;
 		photo.imported = imported;
+		photo.dim = dim;
+		photo.x = x;
+		photo.y = y;
+		photo.z = z;
 		index(photo);
 		try {
 			writeIndex(owner);
@@ -166,13 +241,15 @@ final class PhotoStore {
 
 	/** Remove a foto do índice agora e apaga os arquivos no próximo salvamento. */
 	void remove(Photo photo) {
+		remove(photo, true);
+	}
+
+	void remove(Photo photo, boolean write) {
 		unindex(photo);
 		pendingDeletes.add(fullPath(photo));
 		pendingDeletes.add(thumbPath(photo));
-		try {
-			writeIndex(photo.owner);
-		} catch (IOException | RuntimeException e) {
-			HandyPhoneCore.LOGGER.error("Couldn't write the photo index of {}", photo.owner, e);
+		if (write) {
+			flushIndex(photo.owner);
 		}
 	}
 
@@ -204,7 +281,11 @@ final class PhotoStore {
 	private void index(Photo photo) {
 		byId.put(photo.id, photo);
 		byOwner.computeIfAbsent(photo.owner, k -> new LinkedHashMap<>()).put(photo.id, photo);
-		used.merge(photo.owner, photo.bytes(), Long::sum);
+		if (!photo.hidden) {
+			used.merge(photo.owner, photo.bytes(), Long::sum);
+		} else {
+			hiddenUsed.merge(photo.owner, photo.bytes(), Long::sum);
+		}
 		total += photo.bytes();
 	}
 
@@ -212,7 +293,11 @@ final class PhotoStore {
 		byId.remove(photo.id);
 		Map<Long, Photo> mine = byOwner.get(photo.owner);
 		if (mine != null && mine.remove(photo.id) != null) {
-			used.merge(photo.owner, -photo.bytes(), Long::sum);
+			if (!photo.hidden) {
+				used.merge(photo.owner, -photo.bytes(), Long::sum);
+			} else {
+				hiddenUsed.merge(photo.owner, -photo.bytes(), Long::sum);
+			}
 			total -= photo.bytes();
 		}
 	}

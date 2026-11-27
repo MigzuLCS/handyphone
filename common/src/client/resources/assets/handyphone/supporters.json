@@ -1,0 +1,4 @@
+{
+	"_readme": "Supporters app list, shipped inside the mod (nothing is downloaded). One entry per donation: name, date (YYYY-MM-DD), amount (US dollars, number) and an optional message, only shown from US$ 5 up (a test fails if a smaller donation has one). Only people who asked to be listed; names and messages reviewed by hand.",
+	"supporters": []
+}

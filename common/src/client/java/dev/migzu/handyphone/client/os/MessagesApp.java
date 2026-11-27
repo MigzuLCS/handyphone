@@ -663,12 +663,12 @@ final class MessagesApp extends AppContent {
 			Ui.centered(g, os.data.photos.isGone(m.photo()) ? Lang.t("handyphone.photo.deleted") : Lang.t("handyphone.loading"), x + w / 2f, y + h / 2f + 2.6f);
 		}
 		if (hitBottom - hitTop > 2 && !os.data.photos.isGone(m.photo())) {
-			hit("photo:" + m.seq(), x, hitTop, w, hitBottom - hitTop, PhoneSound.LIST_ITEM, () -> openPhoto(os, m.photo()));
+			hit("photo:" + m.seq(), x, hitTop, w, hitBottom - hitTop, PhoneSound.LIST_ITEM, () -> openPhoto(os, m.photo(), m.sender()));
 		}
 	}
 
-	private void openPhoto(PhoneOS os, long photoId) {
-		viewer.open(photoId, os);
+	private void openPhoto(PhoneOS os, long photoId, String sender) {
+		viewer.open(photoId, os, sender);
 		show(View.PHOTO);
 	}
 

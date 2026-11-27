@@ -47,7 +47,7 @@ public abstract class GameRendererMixin {
 		final Operation<Void> original
 	) {
 		PhoneCameraSource camera = PhoneCameraSource.INSTANCE;
-		if (camera.takeDeferredHands()) {
+		if (camera.takeDeferredHands() || camera.selfieHandsWithShader()) {
 			camera.deferredHandsPass(true);
 			try {
 				hands.submitHandsWithItems(partialTicks, poseStack, collector, playerState, handsState);

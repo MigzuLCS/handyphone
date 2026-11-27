@@ -221,6 +221,22 @@ public final class PhoneData {
 	}
 
 	/** Uma foto da galeria; os pixels vêm do {@link PhotoCache}. */
+	/**
+	 * Informações de uma foto vindas do servidor (1.3). {@code dimension} vazia = sem local (foto do computador, antiga, ou de outra
+	 * pessoa: o servidor só conta o local ao dono).
+	 */
+	public record PhotoInfo(long id, long time, int width, int height, int size, boolean imported, String dimension, int x, int y, int z) {
+		public boolean hasPlace() {
+			return !dimension.isEmpty();
+		}
+	}
+
+	/** Quantas fotos da pasta local a Galeria mostra no máximo (as mais novas). */
+	public static final int MAX_GALLERY_LOCAL = 500;
+
+	/** Informações já recebidas, por foto (pedidas ao abrir o painel "i"). */
+	public final java.util.Map<Long, PhotoInfo> photoInfo = new java.util.HashMap<>();
+
 	public record GalleryPhoto(long id, long time, int size) {
 	}
 

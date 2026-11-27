@@ -229,6 +229,24 @@
 			"handyphone:retro/contact_removed"
 		]
 	},
+	"retro.camera_timer": {
+		"subtitle": "subtitles.handyphone.camera_timer",
+		"sounds": [
+			"handyphone:retro/camera_timer"
+		]
+	},
+	"retro.camera_timer_last": {
+		"subtitle": "subtitles.handyphone.camera_timer_last",
+		"sounds": [
+			"handyphone:retro/camera_timer_last"
+		]
+	},
+	"retro.camera_shutter": {
+		"subtitle": "subtitles.handyphone.camera_shutter",
+		"sounds": [
+			"handyphone:retro/camera_shutter"
+		]
+	},
 	"aero.icon_tap": {
 		"subtitle": "subtitles.handyphone.icon_tap",
 		"sounds": [
@@ -397,6 +415,24 @@
 		"subtitle": "subtitles.handyphone.contact_removed",
 		"sounds": [
 			"handyphone:aero/contact_removed"
+		]
+	},
+	"aero.camera_timer": {
+		"subtitle": "subtitles.handyphone.camera_timer",
+		"sounds": [
+			"handyphone:aero/camera_timer"
+		]
+	},
+	"aero.camera_timer_last": {
+		"subtitle": "subtitles.handyphone.camera_timer_last",
+		"sounds": [
+			"handyphone:aero/camera_timer_last"
+		]
+	},
+	"aero.camera_shutter": {
+		"subtitle": "subtitles.handyphone.camera_shutter",
+		"sounds": [
+			"handyphone:aero/camera_shutter"
 		]
 	},
 	"flat.icon_tap": {
@@ -569,6 +605,24 @@
 			"handyphone:flat/contact_removed"
 		]
 	},
+	"flat.camera_timer": {
+		"subtitle": "subtitles.handyphone.camera_timer",
+		"sounds": [
+			"handyphone:flat/camera_timer"
+		]
+	},
+	"flat.camera_timer_last": {
+		"subtitle": "subtitles.handyphone.camera_timer_last",
+		"sounds": [
+			"handyphone:flat/camera_timer_last"
+		]
+	},
+	"flat.camera_shutter": {
+		"subtitle": "subtitles.handyphone.camera_shutter",
+		"sounds": [
+			"handyphone:flat/camera_shutter"
+		]
+	},
 	"modern.icon_tap": {
 		"subtitle": "subtitles.handyphone.icon_tap",
 		"sounds": [
@@ -737,6 +791,24 @@
 		"subtitle": "subtitles.handyphone.contact_removed",
 		"sounds": [
 			"handyphone:modern/contact_removed"
+		]
+	},
+	"modern.camera_timer": {
+		"subtitle": "subtitles.handyphone.camera_timer",
+		"sounds": [
+			"handyphone:modern/camera_timer"
+		]
+	},
+	"modern.camera_timer_last": {
+		"subtitle": "subtitles.handyphone.camera_timer_last",
+		"sounds": [
+			"handyphone:modern/camera_timer_last"
+		]
+	},
+	"modern.camera_shutter": {
+		"subtitle": "subtitles.handyphone.camera_shutter",
+		"sounds": [
+			"handyphone:modern/camera_shutter"
 		]
 	}
 }

@@ -17,7 +17,7 @@ import java.util.function.IntConsumer;
  * {@link PhoneSettings} e mudam por {@link PhoneOS#changeSettings}, que salva.
  */
 final class SettingsApp extends AppContent {
-	enum Page { MAIN, APPEARANCE, NAVIGATION, SOUNDS, NOTIFICATIONS, SHORTCUT }
+	enum Page { MAIN, APPEARANCE, NAVIGATION, POINTER, SOUNDS, NOTIFICATIONS, PRIVACY, SHORTCUT }
 
 	/** Cores de destaque que o jogador pode escolher (além de "automática" = a cor de cada app). */
 	static final int[] ACCENTS = {0xFF7A1A, 0xEF4444, 0xEC4899, 0x8B5CF6, 0x3B82F6, 0x06B6D4, 0x22C55E, 0xEAB308};
@@ -119,8 +119,10 @@ final class SettingsApp extends AppContent {
 			case MAIN -> drawMain(g, os, rx, cy, rw);
 			case APPEARANCE -> drawAppearance(g, os, rx, cy, rw, accent);
 			case NAVIGATION -> drawNavigation(g, os, rx, cy, rw, accent);
+			case POINTER -> drawPointer(g, os, rx, cy, rw, accent);
 			case SOUNDS -> drawSounds(g, os, rx, cy, rw, accent);
 			case NOTIFICATIONS -> drawNotifications(g, os, rx, cy, rw, accent);
+			case PRIVACY -> drawPrivacy(g, os, rx, cy, rw, accent);
 			case SHORTCUT -> drawShortcut(g, os, rx, cy, rw, accent);
 		};
 		maxScroll = Math.max(0, end + scroll + 6f - top - viewH);
@@ -132,8 +134,10 @@ final class SettingsApp extends AppContent {
 		return switch (p) {
 			case APPEARANCE -> Lang.t("handyphone.settings.section.appearance");
 			case NAVIGATION -> Lang.t("handyphone.settings.section.navigation");
+			case POINTER -> Lang.t("handyphone.settings.section.pointer");
 			case SOUNDS -> Lang.t("handyphone.settings.section.sounds");
 			case NOTIFICATIONS -> Lang.t("handyphone.settings.section.notifications");
+			case PRIVACY -> Lang.t("handyphone.settings.section.privacy");
 			case SHORTCUT -> Lang.t("handyphone.settings.section.shortcut");
 			case MAIN -> "";
 		};
@@ -144,6 +148,7 @@ final class SettingsApp extends AppContent {
 		boolean down = hit("settings:back", rx - 4, y, 26, HEADER_H, PhoneSound.BUTTON, () -> {
 			focus = null; // a seta da página sempre volta, mesmo com o campo hex em uso
 			back(os);
+			os.navigatedBack();
 		});
 		g.setColor(down ? MUTED : INK);
 		g.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
@@ -173,8 +178,12 @@ final class SettingsApp extends AppContent {
 		Object[][] rows = {
 			{Page.APPEARANCE, 0xF97316, themeName},
 			{Page.NAVIGATION, 0x3B82F6, Lang.t("handyphone.settings.summary.navigation", percent(s.scrollSpeed()), percent(s.handSway()))},
+			{Page.POINTER, 0x8B5CF6, Lang.t("handyphone.settings.summary.pointer",
+				Lang.t("handyphone.settings.highlight." + s.highlight().id()), Lang.t("handyphone.settings.cursor." + s.cursorStyle().id()))},
 			{Page.SOUNDS, 0xEC4899, sounds},
 			{Page.NOTIFICATIONS, 0xEF4444, notif},
+			{Page.PRIVACY, 0x10B981, s.showToOthers() ? Lang.t("handyphone.settings.summary.privacy_shown")
+				: Lang.t("handyphone.settings.summary.privacy_hidden")},
 			{Page.SHORTCUT, 0x64748B, os.useKeyName()},
 		};
 		float ry = y + 2f;
@@ -314,42 +323,131 @@ final class SettingsApp extends AppContent {
 		toggleRow(g, rx, ry, rw, accent, "toggle:hint", Lang.t("handyphone.settings.controls_hint.title"),
 			Lang.t("handyphone.settings.controls_hint.subtitle"), s.controlsHint(), PhoneSound.SELECT,
 			() -> os.changeSettings(x -> x.setControlsHint(!x.controlsHint())));
-		ry += TOGGLE_H + GAP;
+		return ry + TOGGLE_H + GAP;
+	}
 
-		// Como o item escolhido pela roda é marcado (celular na mão).
-		ry = label(g, Lang.t("handyphone.settings.highlight"), rx, ry + 4f);
-		String[][] styles = {
-			{"fluid", Lang.t("handyphone.settings.highlight.fluid"), Lang.t("handyphone.settings.highlight.fluid.subtitle")},
-			{"calm", Lang.t("handyphone.settings.highlight.calm"), Lang.t("handyphone.settings.highlight.calm.subtitle")},
-			{"simple", Lang.t("handyphone.settings.highlight.simple"), Lang.t("handyphone.settings.highlight.simple.subtitle")},
-		};
-		PhoneSettings.Highlight[] values = {PhoneSettings.Highlight.FLUID, PhoneSettings.Highlight.CALM, PhoneSettings.Highlight.SIMPLE};
+	/** Destaque da roda (modo "na mão") e cursor (modo expandido): figurinhas, a cor do destaque e o cursor. */
+	private float drawPointer(Graphics2D g, PhoneOS os, float rx, float y, float rw, Color accent) {
+		PhoneSettings s = os.settings();
+		float ry = y;
+		// Como o item escolhido pela roda é marcado (celular na mão): uma figurinha por estilo.
+		ry = label(g, Lang.t("handyphone.settings.highlight"), rx, ry + 2f);
+		PhoneSettings.Highlight[] styles = PhoneSettings.Highlight.values();
+		int ringRgb = os.highlightColor();
 		for (int i = 0; i < styles.length; i++) {
-			PhoneSettings.Highlight value = values[i];
-			boolean selected = s.highlight() == value;
-			boolean down = hit("highlight:" + styles[i][0], rx, ry, rw, TOGGLE_H, PhoneSound.SELECT,
-				() -> os.changeSettings(x -> x.setHighlight(value)));
-			card(g, rx, ry, rw, TOGGLE_H, down, selected ? accent : null);
-			g.setColor(INK);
-			g.setFont(Ui.font(Font.BOLD, 9.2f));
-			Ui.text(g, fit(g, styles[i][1], rw - 34), rx + 8, ry + 12f);
-			g.setColor(MUTED);
-			g.setFont(Ui.font(Font.PLAIN, 7.0f));
-			Ui.text(g, fit(g, styles[i][2], rw - 34), rx + 8, ry + 21.8f);
-			radio(g, rx + rw - 14, ry + TOGGLE_H / 2f, selected, accent);
-			ry += TOGGLE_H + GAP;
+			PhoneSettings.Highlight value = styles[i];
+			tile(g, "highlight:" + value.id(), Lang.t("handyphone.settings.highlight." + value.id()), s.highlight() == value,
+				rx + i * (tileW(rw) + GAP), ry, tileW(rw), accent, () -> os.changeSettings(x -> x.setHighlight(value)),
+				(cx, cy) -> highlightPicture(g, value, cx, cy, ringRgb));
 		}
-		toggleRow(g, rx, ry, rw, accent, "toggle:highlight_animated", Lang.t("handyphone.settings.highlight_animated.title"),
-			Lang.t("handyphone.settings.highlight_animated.subtitle"), s.highlightAnimated(), PhoneSound.SELECT,
-			() -> os.changeSettings(x -> x.setHighlightAnimated(!x.highlightAnimated())));
-		ry += TOGGLE_H + GAP;
-		// A cor do destaque fica junto do estilo e da animação (tudo do destaque num lugar só).
-		ry = label(g, Lang.t("handyphone.settings.highlight_color"), rx, ry + 4f);
+		ry += TILE_H + GAP;
+		ry = hint(g, Lang.t("handyphone.settings.highlight." + s.highlight().id() + ".subtitle"), rx, ry, rw) + 2f;
+		ry = label(g, Lang.t("handyphone.settings.highlight_color"), rx, ry + 6f);
 		int highlightRgb = s.highlightColor();
 		ry = colorRow(g, os, "highlight_color", highlightHex, highlightRgb, os.highlightColor(),
 			rgb -> os.changeSettings(x -> x.setHighlightColor(rgb)), rx, ry, rw, accent);
-		return hint(g, highlightRgb == -1 ? Lang.t("handyphone.settings.highlight_color.auto") : Lang.t("handyphone.settings.highlight_color.fixed"),
+		ry = hint(g, highlightRgb == -1 ? Lang.t("handyphone.settings.highlight_color.auto") : Lang.t("handyphone.settings.highlight_color.fixed"),
 			rx, ry, rw);
+
+		// Cursor do modo expandido (o desenho no vidro onde o mouse cai).
+		ry = label(g, Lang.t("handyphone.settings.cursor"), rx, ry + 6f);
+		PhoneSettings.Cursor[] cursors = PhoneSettings.Cursor.values();
+		for (int i = 0; i < cursors.length; i++) {
+			PhoneSettings.Cursor value = cursors[i];
+			tile(g, "cursor:" + value.id(), Lang.t("handyphone.settings.cursor." + value.id()), s.cursorStyle() == value,
+				rx + i * (tileW(rw) + GAP), ry, tileW(rw), accent, () -> os.changeSettings(x -> x.setCursorStyle(value)),
+				(cx, cy) -> cursorPicture(g, value, cx, cy));
+		}
+		ry += TILE_H + GAP;
+		return hint(g, Lang.t("handyphone.settings.cursor.subtitle"), rx, ry, rw);
+	}
+
+	private static final float TILE_H = 56f, PICTURE_H = 40f;
+
+	/** Largura de uma figurinha: três por linha. */
+	private static float tileW(float rw) {
+		return (rw - 2 * GAP) / 3f;
+	}
+
+	private interface Picture {
+		void draw(float cx, float cy);
+	}
+
+	/**
+	 * Figurinha de escolha: um quadradinho com o desenho da opção sobre um fundo escuro (o destaque e o cursor de verdade aparecem
+	 * sobre a tela) e o nome embaixo. A escolhida tem a borda e o nome na cor de destaque.
+	 */
+	private void tile(Graphics2D g, String key, String name, boolean selected, float x, float y, float w, Color accent, Runnable action,
+		Picture picture) {
+		boolean down = hit(key, x, y, w, TILE_H, PhoneSound.SELECT, action);
+		card(g, x, y, w, TILE_H, down, selected ? accent : null);
+		float pad = 4f;
+		RoundRectangle2D pic = new RoundRectangle2D.Float(x + pad, y + pad, w - 2 * pad, PICTURE_H - pad, 6f, 6f);
+		g.setColor(down ? new Color(0x2A2E38) : new Color(0x3A3F4C));
+		g.fill(pic);
+		java.awt.Shape oldClip = g.getClip();
+		g.clip(pic);
+		picture.draw(x + w / 2f, y + pad + (PICTURE_H - pad) / 2f);
+		g.setClip(oldClip);
+		g.setColor(selected ? accent : INK);
+		g.setFont(Ui.font(Font.BOLD, 8f));
+		Ui.centered(g, fit(g, name, w - 6), x + w / 2f, y + TILE_H - 5.5f);
+	}
+
+	/** Prévia do destaque: um item redondo e a borda em volta, ondulada (fluido), quase lisa (calmo) ou lisa (simples). */
+	private static void highlightPicture(Graphics2D g, PhoneSettings.Highlight style, float cx, float cy, int rgb) {
+		Object aa = g.getRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING);
+		g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setColor(new Color(0xC9CED8));
+		g.fill(new Ellipse2D.Float(cx - 6f, cy - 6f, 12f, 12f));
+		float amp = switch (style) {
+			case FLUID -> 1.3f;
+			case CALM -> 0.55f;
+			case SIMPLE -> 0f;
+		};
+		int lobes = style == PhoneSettings.Highlight.FLUID ? 5 : 4;
+		Color c = new Color(rgb);
+		if (style != PhoneSettings.Highlight.SIMPLE) {
+			// Brilho por fora, como no jogo: anéis cada vez mais largos e transparentes.
+			for (int k = 3; k >= 1; k--) {
+				g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 34));
+				g.setStroke(new BasicStroke(1.6f + k * 1.8f));
+				g.draw(ring(cx, cy, 10.5f + k * 0.9f, amp, lobes));
+			}
+		}
+		g.setColor(c);
+		g.setStroke(new BasicStroke(1.7f));
+		g.draw(ring(cx, cy, 10.5f, amp, lobes));
+		g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, aa);
+	}
+
+	private static GeneralPath ring(float cx, float cy, float r, float amp, int lobes) {
+		GeneralPath p = new GeneralPath();
+		int n = 72;
+		for (int i = 0; i <= n; i++) {
+			double a = i * 2 * Math.PI / n;
+			double rr = r + amp * Math.sin(a * lobes + 0.6);
+			float px = (float) (cx + Math.cos(a) * rr), py = (float) (cy + Math.sin(a) * rr);
+			if (i == 0) {
+				p.moveTo(px, py);
+			} else {
+				p.lineTo(px, py);
+			}
+		}
+		p.closePath();
+		return p;
+	}
+
+	/** Prévia do cursor, no mesmo desenho do jogo. */
+	private static void cursorPicture(Graphics2D g, PhoneSettings.Cursor style, float cx, float cy) {
+		switch (style) {
+			case CROSS -> CursorArt.cross(g, cx, cy, 8f);
+			case HAND -> {
+				float scale = 1.3f;
+				// A mão (de 0,1 a 15,6 de largura e 20,5 de altura) centrada na figurinha; a ponta do dedo fica em (5,5, 0,55).
+				CursorArt.hand(g, cx - (7.85f - 5.5f) * scale, cy - (10.3f - 0.55f) * scale, scale);
+			}
+		}
 	}
 
 	private float drawSounds(Graphics2D g, PhoneOS os, float rx, float y, float rw, Color accent) {
@@ -418,6 +516,25 @@ final class SettingsApp extends AppContent {
 				}
 			});
 		return ry + TOGGLE_H + GAP;
+	}
+
+	private float drawPrivacy(Graphics2D g, PhoneOS os, float rx, float y, float rw, Color accent) {
+		PhoneSettings s = os.settings();
+		float ry = y + 2f;
+		toggleRow(g, rx, ry, rw, accent, "toggle:show_phone", Lang.t("handyphone.settings.show_phone.title"),
+			Lang.t("handyphone.settings.show_phone.subtitle"), s.showToOthers(), PhoneSound.SELECT,
+			() -> os.changeSettings(x -> x.setShowToOthers(!x.showToOthers())));
+		ry += TOGGLE_H + GAP;
+		ry = hint(g, Lang.t("handyphone.settings.show_phone.hint"), rx, ry, rw) + GAP * 2;
+		// Cópia das fotos neste computador (ligada por padrão) e o botão para abrir a pasta.
+		toggleRow(g, rx, ry, rw, accent, "toggle:local_copies", Lang.t("handyphone.settings.local_copies.title"),
+			Lang.t("handyphone.settings.local_copies.subtitle"), s.localCopies(), PhoneSound.SELECT,
+			() -> os.changeSettings(x -> x.setLocalCopies(!x.localCopies())));
+		ry += TOGGLE_H + GAP;
+		button(g, "local:open", Lang.t("handyphone.settings.local_copies.open"), rx, ry, rw, 22f, new Color(0x5B6170), os::openLocalFolder);
+		ry += 22f + GAP;
+		ry = hint(g, Lang.t("handyphone.settings.local_copies.hint", String.valueOf(s.localPhotosMb())), rx, ry, rw);
+		return hint(g, Lang.t("handyphone.settings.local_copies.hint2"), rx, ry, rw);
 	}
 
 	private float drawShortcut(Graphics2D g, PhoneOS os, float rx, float y, float rw, Color accent) {
@@ -568,6 +685,21 @@ final class SettingsApp extends AppContent {
 				bell.closePath();
 				g.fill(bell);
 				g.fill(new Ellipse2D.Float(cx - 1.4f, cy + 3.3f, 2.8f, 2.8f));
+			}
+			case PRIVACY -> {
+				// Um olho.
+				GeneralPath eye = new GeneralPath();
+				eye.moveTo(cx - 5.5f, cy);
+				eye.quadTo(cx, cy - 6f, cx + 5.5f, cy);
+				eye.quadTo(cx, cy + 6f, cx - 5.5f, cy);
+				eye.closePath();
+				g.draw(eye);
+				g.fill(new Ellipse2D.Float(cx - 1.8f, cy - 1.8f, 3.6f, 3.6f));
+			}
+			case POINTER -> {
+				// Um item com o destaque em volta.
+				g.fill(new Ellipse2D.Float(cx - 2f, cy - 2f, 4f, 4f));
+				g.draw(new Ellipse2D.Float(cx - 4.8f, cy - 4.8f, 9.6f, 9.6f));
 			}
 			case SHORTCUT -> {
 				g.draw(new RoundRectangle2D.Float(cx - 5f, cy - 4f, 10f, 8f, 3f, 3f));

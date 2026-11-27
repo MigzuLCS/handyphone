@@ -57,6 +57,9 @@ public final class LocationService {
 	public record Pos(String dimension, double x, double y, double z, boolean spectator) {
 	}
 
+	/** De quanto em quanto tempo (ticks) o servidor confere se o mapa da dimensão de cada jogador mudou (5 s). */
+	static final int MAP_RECHECK_TICKS = 100;
+
 	private static final class PlayerState {
 		int epoch;
 		String dimension = "";
@@ -66,6 +69,9 @@ public final class LocationService {
 		final Set<String> pending = new HashSet<>();
 		final ArrayDeque<PhonePayloads.TileData> out = new ArrayDeque<>();
 		boolean watching;
+		/** O que o último MapInfo disse (installed, rendered, maxZoom), para reenviar só quando muda. */
+		boolean sentInstalled, sentRendered;
+		int sentZoom = -2;
 		/** O cliente já tem uma lista de "quem compartilha" vazia (não adianta mandar outra igual todo segundo). */
 		boolean liveEmpty = true;
 		final ArrayDeque<Long> watchToggles = new ArrayDeque<>();
@@ -200,6 +206,9 @@ public final class LocationService {
 			if (tickCounter % 10 == 0) {
 				refreshDimension(player, entry.getValue());
 			}
+			if (tickCounter % MAP_RECHECK_TICKS == 0) {
+				refreshMapInfo(player, entry.getValue());
+			}
 		}
 		if (tickCounter % 20 == 0) {
 			sweepShares();
@@ -213,9 +222,30 @@ public final class LocationService {
 
 	// ------------------------------------------------------------------ mapa e tiles
 
+	/**
+	 * O mapa da dimensão mudou desde o último MapInfo (o squaremap ficou pronto depois de o jogador entrar, desenhou os primeiros
+	 * tiles de um mundo novo, ganhou um zoom)? Então o celular recebe o aviso de novo, com época nova (o cache de tiles recomeça).
+	 * Antes o aviso só saía ao entrar e ao trocar de dimensão: quem entrava antes de o squaremap ter tiles ficava sem mapa até
+	 * sair do jogo. {@link MapTiles#info} guarda o resultado por 30 s por dimensão, então isto quase nunca toca o disco.
+	 */
+	private void refreshMapInfo(PhonePlayer player, PlayerState state) {
+		MapTiles.Info info = activeTiles.info(state.dimension);
+		boolean rendered = config().mapTilesEnabled && info.available();
+		int zoom = rendered ? info.maxZoom() : -1;
+		if (activeTiles.installed() != state.sentInstalled || rendered != state.sentRendered || zoom != state.sentZoom) {
+			state.epoch++;
+			state.pending.clear();
+			state.out.clear();
+			sendMapInfo(player, state);
+		}
+	}
+
 	private void sendMapInfo(PhonePlayer player, PlayerState state) {
 		MapTiles.Info info = activeTiles.info(state.dimension);
 		boolean rendered = config().mapTilesEnabled && info.available();
+		state.sentInstalled = activeTiles.installed();
+		state.sentRendered = rendered;
+		state.sentZoom = rendered ? info.maxZoom() : -1;
 		PhoneService.send(player, new PhonePayloads.MapInfo(
 			activeTiles.installed(), rendered, rendered ? info.maxZoom() : -1, state.dimension, state.epoch,
 			config().liveLocationEnabled, config().locationMessagesEnabled, config().maxSavedPlaces

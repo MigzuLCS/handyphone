@@ -129,8 +129,32 @@ public final class PhoneOS {
 	private boolean pressedModal;
 	/** Fotos já entregues ao envio e ainda sem resposta do servidor. */
 	private int uploadsInFlight;
-	/** Momento do último disparo, para o clarão do visor. */
+	/** Momento do último disparo, para a animação do visor. */
 	double flashAt = -10;
+	/** O quadro do visor no disparo (voa até a miniatura da galeria e fica nela até a foto chegar do servidor), ou null. */
+	BufferedImage shotFrame;
+	/** A primeira foto da galeria no momento do disparo: quando ela muda, a foto nova chegou e a miniatura de verdade assume. */
+	long shotGalleryTop = -1;
+	/** Duração da animação do disparo no visor (cortina + voo até a miniatura), em segundos. */
+	static final double SHOT_ANIMATION = 0.55;
+
+	/** Câmera (1.3): zoom pedido (1 a {@link #CAMERA_MAX_ZOOM}) e câmera frontal, só nesta sessão do app (voltam ao abrir a Câmera). */
+	float cameraZoom = 1f;
+	boolean cameraSelfie;
+	public static final float CAMERA_MAX_ZOOM = 4f;
+
+	/**
+	 * Zoom da Câmera que o jogo deve aplicar ao campo de visão (1 = nenhum). Só vale com o app Câmera aberto e à vista; fora dele, 1.
+	 * Lido pela thread do jogo (sincronizar no PhoneOS, como o resto).
+	 */
+	public float cameraZoom() {
+		return "camera".equals(openAppId()) && !cameraSelfie ? cameraZoom : 1f;
+	}
+
+	/** A câmera frontal (selfie) está em uso: o jogo põe a vista na frente do jogador. Só com o app Câmera aberto. */
+	public boolean cameraSelfie() {
+		return cameraSelfie && "camera".equals(openAppId());
+	}
 
 	/** 0 = tela de bloqueio, 1 = desbloqueado. */
 	final Spring unlock = Spring.smooth(0);
@@ -159,6 +183,8 @@ public final class PhoneOS {
 	private final Spring banner = Spring.smooth(0);
 	private String bannerTitle = "", bannerText = "";
 	private long bannerConversation = -1;
+	/** O que tocar no aviso do topo faz, quando não é abrir uma conversa (por exemplo, abrir a pasta das fotos salvas). */
+	private Runnable bannerAction;
 	private String bannerGlyph = "messages";
 	private double bannerUntil;
 	private boolean pressedBanner;
@@ -437,8 +463,8 @@ public final class PhoneOS {
 		settings.setTheme(s.theme());
 		settings.setAccent(s.accent());
 		settings.setHighlight(s.highlight());
-		settings.setHighlightAnimated(s.highlightAnimated());
 		settings.setHighlightColor(s.highlightColor());
+		settings.setCursorStyle(s.cursorStyle());
 		settings.setScrollSpeed(s.scrollSpeed());
 		settings.setHandSway(s.handSway());
 		settings.setControlsHint(s.controlsHint());
@@ -478,6 +504,11 @@ public final class PhoneOS {
 
 	public boolean uiSounds() {
 		return settings.uiSounds();
+	}
+
+	/** Ajustes > Privacidade > Mostrar o celular aos outros. */
+	public void setShowToOthers(boolean show) {
+		changeSettings(s -> s.setShowToOthers(show));
 	}
 
 	public void setUiSounds(boolean enabled) {
@@ -529,6 +560,13 @@ public final class PhoneOS {
 		throw new IllegalArgumentException("Unknown app: " + appId);
 	}
 
+	/** Centro de uma área clicável do app aberto (pela chave, do último desenho), em coordenadas da face; null se não existe. Para os testes. */
+	public float[] areaCenter(String key) {
+		AppContent c = content();
+		float[] r = c == null ? null : c.focusTargets().get(key);
+		return r == null ? null : new float[] {r[0] + r[2] / 2f, r[1] + r[3] / 2f};
+	}
+
 	public void step(double dt) {
 		time += dt;
 		stepScroll(dt);
@@ -564,9 +602,11 @@ public final class PhoneOS {
 				dirty = true;
 			}
 		}
-		if (time - flashAt < 0.3) {
+		if (time - flashAt < SHOT_ANIMATION + 0.05) {
 			dirty = true;
 		}
+		stepCountdown();
+		stepExport();
 		expireCall();
 		PhoneData.Call call = data.call;
 		if (awake && call.state != PhoneData.CALL_NONE) {
@@ -665,6 +705,14 @@ public final class PhoneOS {
 		modal = null;
 		pressedModal = false;
 		backend = PhoneBackend.OFFLINE;
+		localOnly = false;
+		serverBackend = null;
+		localFullWarned = false;
+		localIds.clear();
+		localNames.clear();
+		// Os ids de foto são de cada servidor: as informações de um não podem aparecer em outro.
+		data.photoInfo.clear();
+		infoAsked.clear();
 		dirty = true;
 	}
 
@@ -830,6 +878,7 @@ public final class PhoneOS {
 	}
 
 	private void showBanner(String title, String text, long conversation, String glyph) {
+		bannerAction = null;
 		bannerTitle = title;
 		bannerText = text;
 		bannerConversation = conversation;
@@ -910,6 +959,11 @@ public final class PhoneOS {
 			data.tiles.reset(epoch);
 		}
 		dirty = true;
+	}
+
+	/** O servidor disse que há mapa desenhado para a dimensão atual (último MapInfo); para os testes. */
+	public boolean mapRendered() {
+		return data.map.rendered;
 	}
 
 	public void applyTile(int epoch, int zoom, int x, int z, BufferedImage image, long stamp) {
@@ -1194,6 +1248,26 @@ public final class PhoneOS {
 	 * @param pendingLimit quantas fotos podem estar em andamento ao mesmo tempo
 	 */
 	private boolean canAddPhoto(boolean fromComputer, int pendingLimit) {
+		if (localOnly) {
+			// Sem o mod no servidor: só fotos da câmera, gravadas na pasta deste computador.
+			if (fromComputer) {
+				photoNotice(Lang.t("handyphone.photo.no_import"), true);
+				return false;
+			}
+			if (localPhotos.root() == null) {
+				photoNotice(Lang.t("handyphone.no_signal"), true);
+				return false;
+			}
+			if (localPhotos.full()) {
+				photoNotice(Lang.t("handyphone.photo.local_full", String.valueOf(settings.localPhotosMb())), true);
+				return false;
+			}
+			if (photoJobs >= pendingLimit) {
+				photoNotice(Lang.t("handyphone.photo.wait"), true);
+				return false;
+			}
+			return true;
+		}
 		if (backend == PhoneBackend.OFFLINE || data.number.isEmpty()) {
 			photoNotice(Lang.t("handyphone.no_signal"), true);
 			return false;
@@ -1217,16 +1291,85 @@ public final class PhoneOS {
 		return true;
 	}
 
+	/** Fim da contagem do temporizador (em {@link #time}), ou negativo sem contagem; e o último segundo que já tocou. */
+	private double countdownEnd = -1;
+	private int countdownBeeped;
+
+	/**
+	 * O disparador foi tocado: com o temporizador ligado começa a contagem (tocar de novo cancela); sem ele, dispara na hora.
+	 * Confere antes se dá para tirar a foto, para não contar à toa.
+	 */
+	void shutterPressed() {
+		if (countdownEnd >= 0) {
+			countdownEnd = -1;
+			dirty = true;
+			playSound(PhoneSound.BUTTON);
+			return;
+		}
+		int seconds = settings.cameraTimer();
+		if (seconds <= 0) {
+			takePhoto();
+			return;
+		}
+		if (!canAddPhoto(false, 2)) {
+			return;
+		}
+		countdownEnd = time + seconds;
+		countdownBeeped = 0;
+		dirty = true;
+		stepCountdown();
+	}
+
+	/** Segundos que faltam na contagem do temporizador (arredondado para cima), ou 0 sem contagem. */
+	int cameraCountdown() {
+		return countdownEnd < 0 ? 0 : (int) Math.ceil(countdownEnd - time - 1e-9);
+	}
+
+	/** Fração do segundo atual da contagem que já passou (0 no começo do número, 1 no fim), para a animação. */
+	float cameraCountdownPhase() {
+		if (countdownEnd < 0) {
+			return 0f;
+		}
+		double left = countdownEnd - time;
+		return (float) (1.0 - (left - Math.floor(left)));
+	}
+
+	/** A cada passo: um toque por segundo (o último, mais agudo) e a foto no zero. Sair da Câmera cancela. */
+	private void stepCountdown() {
+		if (countdownEnd < 0) {
+			return;
+		}
+		// Sair da Câmera, guardar o celular, uma janela de confirmação ou uma ligação por cima cancelam a contagem.
+		if (!awake || !"camera".equals(openAppId()) || modal != null || (data.call.state != PhoneData.CALL_NONE && !data.call.minimized)) {
+			countdownEnd = -1;
+			dirty = true;
+			return;
+		}
+		dirty = true;
+		if (time >= countdownEnd) {
+			countdownEnd = -1;
+			takePhoto();
+			return;
+		}
+		int left = cameraCountdown();
+		if (left > 0 && left != countdownBeeped) {
+			countdownBeeped = left;
+			playSound(left == 1 ? PhoneSound.CAMERA_TIMER_LAST : PhoneSound.CAMERA_TIMER);
+		}
+	}
+
 	/** Dispara a câmera: captura o mundo (sem a interface e sem o celular), reduz, comprime e envia. */
 	void takePhoto() {
 		if (!canAddPhoto(false, 2)) {
 			return;
 		}
 		flashAt = time;
+		shotFrame = camera.preview();
+		shotGalleryTop = data.gallery.isEmpty() ? -1 : data.gallery.getFirst().id();
 		dirty = true;
 		photoJobs++;
-		// PONTO DO SOM DO OBTURADOR: quando os efeitos sonoros do celular tiverem o som da câmera,
-		// é aqui, no instante do disparo, que ele toca (algo como playSound(PhoneSound.CAMERA_SHUTTER)).
+		playSound(PhoneSound.CAMERA_SHUTTER);
+		boolean localAtShot = localOnly;
 		camera.shoot(image -> {
 			if (image == null) {
 				synchronized (this) {
@@ -1235,7 +1378,7 @@ public final class PhoneOS {
 				}
 				return;
 			}
-			IMAGE_WORK.execute(() -> encodeAndSubmit(image, false, Lang.t("handyphone.preview.photo")));
+			IMAGE_WORK.execute(() -> encodeAndSubmit(image, false, Lang.t("handyphone.preview.photo"), localAtShot));
 		});
 	}
 
@@ -1301,6 +1444,11 @@ public final class PhoneOS {
 	 * com algo pessoal, e o dono do servidor passaria a ter o arquivo.
 	 */
 	private void encodeAndSubmit(BufferedImage image, boolean fromComputer, String label) {
+		encodeAndSubmit(image, fromComputer, label, false);
+	}
+
+	/** @param localAtShot o disparo foi no modo "só neste computador" (decidido na hora: o modo pode mudar enquanto a foto é codificada) */
+	private void encodeAndSubmit(BufferedImage image, boolean fromComputer, String label, boolean localAtShot) {
 		byte[] jpeg = null;
 		String error = null;
 		try {
@@ -1310,7 +1458,30 @@ public final class PhoneOS {
 		} catch (RuntimeException | OutOfMemoryError e) {
 			error = Lang.t("handyphone.photo.reason.process");
 		}
+		// Fotos da câmera: a cópia neste computador (se ligada) ou, sem o mod no servidor, o único lugar. Gravada aqui, fora do lock.
+		boolean local = localAtShot && !fromComputer;
+		String savedLocally = null;
+		if (jpeg != null && !fromComputer && (local || settings.localCopies())) {
+			localPhotos.setCapMb(settings.localPhotosMb());
+			savedLocally = localPhotos.save(jpeg, System.currentTimeMillis());
+		}
 		synchronized (this) {
+			if (local) {
+				photoJobs--;
+				if (savedLocally != null) {
+					photoNotice(Lang.t("handyphone.photo.local_saved"), false);
+					refreshLocalGallery();
+				} else {
+					photoNotice(jpeg == null ? error : localPhotos.full() ? Lang.t("handyphone.photo.local_full", String.valueOf(settings.localPhotosMb()))
+						: Lang.t("handyphone.photo.local_failed"), true);
+				}
+				dirty = true;
+				return;
+			}
+			if (jpeg != null && !fromComputer && settings.localCopies() && savedLocally == null && !localFullWarned && localPhotos.full()) {
+				localFullWarned = true;
+				photoNotice(Lang.t("handyphone.photo.local_full", String.valueOf(settings.localPhotosMb())), true);
+			}
 			photoJobs--;
 			if (jpeg != null && fromComputer) {
 				pendingImports.add(new PendingImport(jpeg, previewOf(image), label));
@@ -1462,6 +1633,371 @@ public final class PhoneOS {
 		backend.sendPhoto(conversation, photo);
 		playSound(PhoneSound.MESSAGE_SENT);
 		returnToChat(conversation);
+	}
+
+	/** Várias fotos da seleção da Galeria, uma mensagem cada, da mais antiga para a mais nova (a ordem em que foram tiradas). */
+	void sendPhotosTo(long conversation, List<Long> photos) {
+		List<Long> ordered = new ArrayList<>(photos);
+		java.util.Collections.sort(ordered);
+		for (long photo : ordered) {
+			backend.sendPhoto(conversation, photo);
+		}
+		playSound(PhoneSound.MESSAGE_SENT);
+		returnToChat(conversation);
+	}
+
+	/** Apaga várias fotos da galeria (a lista volta do servidor sem elas). */
+	void deletePhotos(List<Long> ids) {
+		if (!ids.isEmpty()) {
+			backend.deletePhotos(ids);
+		}
+	}
+
+	// ------------------------------------------------------------------ fotos neste computador (1.3)
+
+	/** A pasta de fotos deste computador (cópias das fotos tiradas e, sem o mod no servidor, a galeria inteira). */
+	public final LocalPhotos localPhotos = new LocalPhotos();
+	private volatile Runnable openLocalFolder = () -> { };
+	/** O servidor não tem o HandyPhone: a câmera grava só aqui e a Galeria mostra a pasta deste servidor. */
+	private volatile boolean localOnly;
+	/** O backend do servidor guardado enquanto o local está em uso (para voltar se o servidor anunciar o mod depois). */
+	private PhoneBackend serverBackend;
+	/** Ids das fotos locais na galeria (negativos, para não confundir com os do servidor), pelo nome do arquivo, e o contrário. */
+	private final Map<String, Long> localIds = new java.util.HashMap<>();
+	private final Map<Long, String> localNames = new java.util.HashMap<>();
+	private long nextLocalId = -1;
+	/** Já avisou nesta sessão que a pasta local encheu (não repetir a cada foto). */
+	private boolean localFullWarned;
+
+	public void setLocalPhotoRoot(java.nio.file.Path root, Runnable open) {
+		localPhotos.setRoot(root);
+		openLocalFolder = open == null ? () -> { } : open;
+	}
+
+	/** O servidor ou mundo atual: nome da subpasta das fotos locais (limpo pelo LocalPhotos). */
+	public void setLocalPhotoPlace(String place) {
+		localPhotos.setPlace(place);
+		localIds.clear();
+		localNames.clear();
+		// Conta o espaço usado agora, fora da thread de desenho (a câmera consulta só o resultado).
+		int capMb = settings.localPhotosMb();
+		IMAGE_WORK.execute(() -> {
+			localPhotos.setCapMb(capMb);
+			localPhotos.usedBytes();
+		});
+	}
+
+	public boolean localOnly() {
+		return localOnly;
+	}
+
+	/** Liga o modo "só neste computador" (servidor sem o mod) ou volta ao servidor (que anunciou o mod). */
+	public void setLocalOnly(boolean on) {
+		if (on == localOnly) {
+			return;
+		}
+		localOnly = on;
+		data.photoInfo.clear();
+		infoAsked.clear();
+		if (on) {
+			serverBackend = backend;
+			backend = localBackend();
+			data.photos.clear();
+			refreshLocalGallery();
+		} else {
+			backend = serverBackend != null ? serverBackend : PhoneBackend.OFFLINE;
+			serverBackend = null;
+			data.gallery.clear();
+			data.photos.clear();
+			data.photoUsedBytes = 0;
+			data.photoQuotaBytes = 0;
+		}
+		dirty = true;
+	}
+
+	void openLocalFolder() {
+		openLocalFolder.run();
+	}
+
+	/** Relê a pasta do servidor atual (fora da thread de desenho) e põe na galeria. */
+	private void refreshLocalGallery() {
+		IMAGE_WORK.execute(() -> {
+			localPhotos.setCapMb(settings.localPhotosMb());
+			List<LocalPhotos.Entry> entries = localPhotos.list(PhoneData.MAX_GALLERY_LOCAL);
+			long used = localPhotos.usedBytes(), cap = localPhotos.capBytes();
+			synchronized (PhoneOS.this) {
+				if (!localOnly) {
+					return;
+				}
+				List<PhoneData.GalleryPhoto> list = new ArrayList<>();
+				for (LocalPhotos.Entry e : entries) {
+					long id = localIds.computeIfAbsent(e.name(), n -> nextLocalId--);
+					localNames.put(id, e.name());
+					list.add(new PhoneData.GalleryPhoto(id, e.time(), (int) e.size()));
+				}
+				applyGallery(list, used, cap, false);
+			}
+		});
+	}
+
+	/**
+	 * O "servidor" do modo local: só fotos, lidas da pasta com as mesmas defesas de uma foto vinda de um servidor
+	 * ({@code PhotoCodec.decodeStored}). Mensagens, contatos, mapa e ligações não existem sem o mod.
+	 */
+	private PhoneBackend localBackend() {
+		return (PhoneBackend) java.lang.reflect.Proxy.newProxyInstance(PhoneBackend.class.getClassLoader(), new Class<?>[] {PhoneBackend.class},
+			(proxy, method, args) -> {
+				switch (method.getName()) {
+					case "requestPhoto" -> loadLocal((Long) args[0], (Boolean) args[1], false);
+					case "requestPhotoInfo" -> loadLocal((Long) args[0], false, true);
+					case "deletePhoto" -> deleteLocal(List.of((Long) args[0]));
+					case "deletePhotos" -> {
+						@SuppressWarnings("unchecked")
+						List<Long> ids = (List<Long>) args[0];
+						deleteLocal(ids);
+					}
+					case "hashCode" -> {
+						return System.identityHashCode(proxy);
+					}
+					case "equals" -> {
+						return proxy == args[0];
+					}
+					case "toString" -> {
+						return "LocalBackend";
+					}
+					default -> {
+					}
+				}
+				return method.getReturnType() == boolean.class ? Boolean.FALSE : null;
+			});
+	}
+
+	private void loadLocal(long id, boolean thumb, boolean info) {
+		String name;
+		synchronized (this) {
+			name = localNames.get(id);
+		}
+		IMAGE_WORK.execute(() -> {
+			byte[] bytes = name == null ? null : localPhotos.read(name);
+			BufferedImage image = null;
+			if (bytes != null) {
+				try {
+					image = dev.migzu.handyphone.photo.PhotoCodec.decodeStored(bytes);
+				} catch (dev.migzu.handyphone.photo.PhotoCodec.PhotoException | RuntimeException e) {
+					image = null;
+				}
+			}
+			BufferedImage shown = image != null && thumb ? scaleDown(image, 160) : image;
+			int size = bytes == null ? 0 : bytes.length;
+			synchronized (PhoneOS.this) {
+				if (info) {
+					if (image != null) {
+						long time = 0;
+						for (PhoneData.GalleryPhoto p : data.gallery) {
+							if (p.id() == id) {
+								time = p.time();
+							}
+						}
+						applyPhotoInfo(new PhoneData.PhotoInfo(id, time, image.getWidth(), image.getHeight(), size, false, "", 0, 0, 0));
+					}
+				} else if (shown != null) {
+					applyPhoto(id, thumb, shown);
+				} else {
+					applyPhotoFailed(id, thumb, false);
+				}
+			}
+		});
+	}
+
+	private void deleteLocal(List<Long> ids) {
+		List<String> names = new ArrayList<>();
+		synchronized (this) {
+			for (long id : ids) {
+				String name = localNames.get(id);
+				if (name != null) {
+					names.add(name);
+				}
+			}
+		}
+		IMAGE_WORK.execute(() -> {
+			for (String name : names) {
+				localPhotos.delete(name);
+			}
+			refreshLocalGallery();
+		});
+	}
+
+	private static BufferedImage scaleDown(BufferedImage image, int max) {
+		int w = image.getWidth(), h = image.getHeight();
+		float k = Math.min(1f, max / (float) Math.max(w, h));
+		if (k >= 1f) {
+			return image;
+		}
+		BufferedImage out = new BufferedImage(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), BufferedImage.TYPE_INT_RGB);
+		java.awt.Graphics2D g = out.createGraphics();
+		g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+		g.drawImage(image, 0, 0, out.getWidth(), out.getHeight(), null);
+		g.dispose();
+		return out;
+	}
+
+	// ------------------------------------------------------------------ salvar no computador (1.3)
+
+	/** Pasta onde as fotos são salvas (no jogo, {@code screenshots/handyphone}) e quem a abre no sistema; null = indisponível. */
+	private volatile java.nio.file.Path exportFolder;
+	private volatile Runnable openExportFolder = () -> { };
+	private final java.util.ArrayDeque<Long> exportQueue = new java.util.ArrayDeque<>();
+	/** A foto que está sendo baixada/gravada agora (-1 = nenhuma), desde quando, e se a gravação já foi entregue à thread de imagens. */
+	private long exportCurrent = -1;
+	private double exportSince;
+	private boolean exportWriting;
+	private int exportOk, exportFailed;
+	/** Quanto esperar a foto inteira chegar do servidor antes de desistir dela. */
+	private static final double EXPORT_TIMEOUT = 20;
+
+	public void setExportFolder(java.nio.file.Path folder, Runnable open) {
+		exportFolder = folder;
+		openExportFolder = open == null ? () -> { } : open;
+	}
+
+	/** Pasta das fotos salvas (para os testes). */
+	public java.nio.file.Path exportFolder() {
+		return exportFolder;
+	}
+
+	/** Fotos esperando para serem salvas (contando a atual); 0 = nada em andamento. */
+	public int exportPending() {
+		return exportQueue.size() + (exportCurrent >= 0 ? 1 : 0);
+	}
+
+	/**
+	 * Salva fotos no computador, em PNG (sem perder nada além do que o JPEG já perdeu), uma por vez: cada uma é baixada inteira do
+	 * servidor (o cache guarda poucas) e gravada fora da thread de desenho. No fim, um aviso; tocar nele abre a pasta.
+	 */
+	void exportPhotos(List<Long> ids) {
+		if (exportFolder == null) {
+			photoNotice(Lang.t("handyphone.photo.save_unavailable"), true);
+			return;
+		}
+		for (long id : ids) {
+			if (id != exportCurrent && !exportQueue.contains(id)) {
+				exportQueue.add(id);
+			}
+		}
+		dirty = true;
+	}
+
+	private void stepExport() {
+		if (exportCurrent < 0) {
+			Long next = exportQueue.poll();
+			if (next == null) {
+				return;
+			}
+			exportCurrent = next;
+			exportSince = time;
+			exportWriting = false;
+		}
+		if (exportWriting) {
+			return;
+		}
+		long id = exportCurrent;
+		BufferedImage full = data.photos.full(id, backend, time);
+		if (full == null) {
+			if (data.photos.isGone(id) || time - exportSince > EXPORT_TIMEOUT) {
+				finishExport(false);
+			}
+			return;
+		}
+		exportWriting = true;
+		java.nio.file.Path folder = exportFolder;
+		long taken = photoTime(id);
+		IMAGE_WORK.execute(() -> {
+			boolean ok = false;
+			try {
+				java.nio.file.Files.createDirectories(folder);
+				String stamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss")
+					.format(java.time.Instant.ofEpochMilli(taken).atZone(java.time.ZoneId.systemDefault()));
+				java.nio.file.Path file = folder.resolve("handyphone_" + stamp + "_" + id + ".png");
+				ok = java.nio.file.Files.exists(file) || javax.imageio.ImageIO.write(full, "png", file.toFile());
+			} catch (IOException | RuntimeException e) {
+				ok = false;
+			}
+			synchronized (PhoneOS.this) {
+				finishExport(ok);
+			}
+		});
+	}
+
+	/** Quando a foto foi tirada (da galeria, ou da mensagem que a trouxe); sem saber, agora. */
+	private long photoTime(long id) {
+		for (PhoneData.GalleryPhoto p : data.gallery) {
+			if (p.id() == id) {
+				return p.time();
+			}
+		}
+		for (PhoneData.Conversation c : data.conversations) {
+			for (PhoneData.Message m : c.messages) {
+				if (m.photo() == id) {
+					return m.time();
+				}
+			}
+		}
+		return System.currentTimeMillis();
+	}
+
+	private void finishExport(boolean ok) {
+		if (ok) {
+			exportOk++;
+		} else {
+			exportFailed++;
+		}
+		exportCurrent = -1;
+		exportWriting = false;
+		dirty = true;
+		if (!exportQueue.isEmpty()) {
+			return;
+		}
+		int saved = exportOk, failed = exportFailed;
+		exportOk = 0;
+		exportFailed = 0;
+		if (saved > 0) {
+			showBanner(Lang.t("handyphone.banner.photos"), Lang.plural("handyphone.photo.exported", saved), -1, "gallery");
+			bannerAction = openExportFolder;
+			playSound(PhoneSound.CONTACT_SAVED);
+		}
+		if (failed > 0 && saved == 0) {
+			photoNotice(Lang.plural("handyphone.photo.save_failed", failed), true);
+		}
+	}
+
+	/** Último pedido de informações por foto (não repetir a cada quadro enquanto a resposta não chega). */
+	private final java.util.Map<Long, Double> infoAsked = new java.util.HashMap<>();
+
+	/** Informações da foto, pedindo ao servidor se ainda não vieram (no máximo um pedido a cada 10 s por foto); null enquanto isso. */
+	PhoneData.PhotoInfo photoInfo(long id) {
+		PhoneData.PhotoInfo info = data.photoInfo.get(id);
+		if (info == null) {
+			Double asked = infoAsked.get(id);
+			if (asked == null || time - asked > 10) {
+				infoAsked.put(id, time);
+				backend.requestPhotoInfo(id);
+			}
+		}
+		return info;
+	}
+
+	/** O servidor mandou as informações de uma foto. */
+	public void applyPhotoInfo(PhoneData.PhotoInfo info) {
+		if (data.photoInfo.size() > 400) {
+			data.photoInfo.clear();
+		}
+		data.photoInfo.put(info.id(), info);
+		dirty = true;
+	}
+
+	/** Aviso de erro no topo, como os do servidor (para regras do próprio celular, por exemplo o limite de fotos por envio). */
+	void showError(String text) {
+		photoNotice(text, true);
 	}
 
 	/** Abre a galeria só para escolher uma foto e enviá-la a essa conversa (botão de anexar). */
@@ -1691,6 +2227,16 @@ public final class PhoneOS {
 			}
 		}
 		return -1;
+	}
+
+	/**
+	 * Uma seta de voltar desenhada pelo próprio app (cabeçalho de página) foi tocada: o destaque segue a regra do voltar (o item de onde
+	 * veio), como no botão direito, e não a de "tela nova" que o toque ligou.
+	 */
+	void navigatedBack() {
+		focusForward = false;
+		focusBack = true;
+		dirty = true;
 	}
 
 	/** Lembra o item tocado (o mais recente vai para o fim; no máximo 32). */
@@ -1946,6 +2492,11 @@ public final class PhoneOS {
 					}
 				} else {
 					playSound(PhoneSound.BUTTON);
+					Runnable action = bannerAction;
+					bannerAction = null;
+					if (action != null) {
+						action.run();
+					}
 				}
 			}
 		} else if (pressedHomeBar) {
@@ -2480,7 +3031,38 @@ public final class PhoneOS {
 		dirty = true;
 	}
 
+	/**
+	 * Imagem parada da tela, como os outros jogadores veem o celular de fora (terceira pessoa): a tela inicial do tema, sem relógio, sem
+	 * nada do jogador (um PhoneOS novo, sem dados) e sem cursor nem destaque. Desenhada uma vez por tema; o tamanho é o da face
+	 * ({@link #FACE_W} x {@link #FACE_H}) vezes a escala.
+	 */
+	public static java.awt.image.BufferedImage renderStill(String themeId, float pixelScale) {
+		PhoneOS os = new PhoneOS();
+		os.still = true;
+		os.switchTheme(themeId);
+		os.setAwake(true);
+		for (int i = 0; i < 240; i++) {
+			os.step(1 / 60.0);
+		}
+		java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(Math.round(FACE_W * pixelScale), Math.round(FACE_H * pixelScale),
+			java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = img.createGraphics();
+		g.scale(pixelScale, pixelScale);
+		os.render(g, pixelScale);
+		g.dispose();
+		return img;
+	}
+
+	/** Os temas, na ordem fixa em que viajam pela rede (o índice é o número do tema no pacote de pose). */
+	public static final List<String> THEME_IDS = List.of("retro", "aero", "flat", "modern");
+
+	/** Imagem parada (ver {@link #renderStill}): sem relógio. */
+	private boolean still;
+
 	String clockText() {
+		if (still) {
+			return "";
+		}
 		return lastClock.isEmpty() ? LocalDateTime.now().format(timeFormat()) : lastClock;
 	}
 }

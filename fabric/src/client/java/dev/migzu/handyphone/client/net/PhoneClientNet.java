@@ -91,12 +91,47 @@ public final class PhoneClientNet implements PhoneBackend {
 	private PhoneClientNet() {
 	}
 
+	/** Ticks desde que entrou no servidor (o anúncio dos canais chega logo depois da entrada). */
+	private int joinedTicks;
+
+	/**
+	 * Servidor sem o HandyPhone (nenhum canal do celular anunciado uns segundos depois de entrar): a câmera e a Galeria passam a usar só a
+	 * pasta deste computador. Se o servidor anunciar os canais depois, volta ao normal.
+	 */
+	private void tickLocalMode(net.minecraft.client.Minecraft mc, PhoneOS os) {
+		if (mc.getConnection() == null) {
+			return;
+		}
+		joinedTicks++;
+		boolean modded = FabricClientNet.canSend(PhonePayloads.UploadBegin.TYPE);
+		if (modded || joinedTicks > 60) {
+			synchronized (os) {
+				os.setLocalOnly(!modded);
+			}
+		}
+	}
+
+	/** Nome da pasta das fotos locais: o endereço do servidor, ou o nome do mundo de um jogador (o LocalPhotos limpa os caracteres). */
+	private static String placeName(net.minecraft.client.Minecraft mc) {
+		net.minecraft.client.multiplayer.ServerData server = mc.getCurrentServer();
+		if (server != null && server.ip != null && !server.ip.isBlank()) {
+			return server.ip;
+		}
+		var single = mc.getSingleplayerServer();
+		if (single != null) {
+			return "singleplayer_" + single.getWorldData().getLevelName();
+		}
+		return "unknown";
+	}
+
 	public static void register() {
 		PhoneOS os = PhoneController.INSTANCE.os;
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) -> {
+			INSTANCE.joinedTicks = 0;
 			synchronized (os) {
 				os.setBackend(INSTANCE);
+				os.setLocalPhotoPlace(placeName(mc));
 			}
 		});
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) -> {
@@ -105,7 +140,10 @@ public final class PhoneClientNet implements PhoneBackend {
 				os.clearData();
 			}
 		});
-		ClientTickEvents.END_CLIENT_TICK.register(mc -> INSTANCE.tickUploads());
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+			INSTANCE.tickUploads();
+			INSTANCE.tickLocalMode(mc, os);
+		});
 
 		FabricClientNet.receive(PhonePayloads.Sync.TYPE, (packet, ctx) -> {
 			Map<String, String> contacts = new LinkedHashMap<>();
@@ -170,6 +208,12 @@ public final class PhoneClientNet implements PhoneBackend {
 			}
 		});
 		FabricClientNet.receive(PhonePayloads.UploadResult.TYPE, (packet, ctx) -> INSTANCE.onUploadResult(os, packet));
+		FabricClientNet.receive(PhonePayloads.PhotoInfo.TYPE, (packet, ctx) -> {
+			synchronized (os) {
+				os.applyPhotoInfo(new PhoneData.PhotoInfo(packet.id(), packet.time(), packet.width(), packet.height(), packet.size(), packet.imported(),
+					packet.dimension(), packet.x(), packet.y(), packet.z()));
+			}
+		});
 
 		FabricClientNet.receive(PhonePayloads.MapInfo.TYPE, (packet, ctx) -> {
 			synchronized (os) {
@@ -406,10 +450,18 @@ public final class PhoneClientNet implements PhoneBackend {
 	 * Um envio por vez (o servidor também só aceita um): começa, manda uma parte por tick,
 	 * termina e espera a resposta antes de passar para o próximo da fila.
 	 */
+	/** Fotos a apagar num servidor antigo (sem o pacote de várias), mandadas aos poucos. */
+	private final java.util.ArrayDeque<Long> slowDeletes = new java.util.ArrayDeque<>();
+	private int slowDeleteTicks;
+
 	private void tickUploads() {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.getConnection() == null) {
+			slowDeletes.clear();
 			return;
+		}
+		if (!slowDeletes.isEmpty() && ++slowDeleteTicks % 4 == 0) {
+			deletePhoto(slowDeletes.poll());
 		}
 		if (activeUpload == null) {
 			activeUpload = uploadQueue.poll();
@@ -537,6 +589,26 @@ public final class PhoneClientNet implements PhoneBackend {
 	@Override
 	public void deletePhoto(long id) {
 		send(new PhonePayloads.PhotoDelete(id));
+	}
+
+	@Override
+	public void requestPhotoInfo(long id) {
+		if (FabricClientNet.canSend(PhonePayloads.PhotoInfoGet.TYPE)) {
+			send(new PhonePayloads.PhotoInfoGet(id));
+		}
+	}
+
+	@Override
+	public void deletePhotos(java.util.List<Long> ids) {
+		if (!FabricClientNet.canSend(PhonePayloads.PhotoDeleteMany.TYPE)) {
+			// Servidor de antes da 1.3: uma a uma, espalhadas (5 por segundo): todas de uma vez estourariam o orçamento de pacotes do
+			// servidor (60 fichas) e, com centenas, a conexão cairia por excesso.
+			slowDeletes.addAll(ids);
+			return;
+		}
+		for (int from = 0; from < ids.size(); from += PhonePayloads.MAX_DELETE_MANY) {
+			send(new PhonePayloads.PhotoDeleteMany(ids.subList(from, Math.min(ids.size(), from + PhonePayloads.MAX_DELETE_MANY))));
+		}
 	}
 
 	@Override

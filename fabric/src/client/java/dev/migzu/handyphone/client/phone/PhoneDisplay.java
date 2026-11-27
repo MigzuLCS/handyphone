@@ -27,6 +27,9 @@ public final class PhoneDisplay {
 	public static final Identifier SCREEN_TEXTURE = HandyPhone.id("dynamic/phone_screen");
 	public static final Identifier BODY_TEXTURE = HandyPhone.id("dynamic/phone_body");
 	public static final Identifier BACK_TEXTURE = HandyPhone.id("dynamic/phone_back");
+	/** Cursor de mão (Ajustes > Destaque e cursor > Cursor), desenhado uma vez pela mesma arte da figurinha ({@code CursorArt}). */
+	public static final Identifier CURSOR_HAND_TEXTURE = HandyPhone.id("dynamic/phone_cursor_hand");
+	static final int CURSOR_HAND_PX = 64;
 	private static final float PIXEL_SCALE = 2.5f;
 	public static final int WIDTH = Math.round(PhoneOS.FACE_W * PIXEL_SCALE);
 	public static final int HEIGHT = Math.round(PhoneOS.FACE_H * PIXEL_SCALE);
@@ -44,6 +47,75 @@ public final class PhoneDisplay {
 
 	public PhoneDisplay(PhoneOS os) {
 		this.os = os;
+	}
+
+	/** Corpo e traseira prontos (thread de render), para desenhar o celular de outro jogador sem ter puxado o próprio. */
+	public void ensureTextures() {
+		if (screen == null) {
+			createTextures();
+		}
+	}
+
+	// Tela vista de fora (terceira pessoa): uma imagem parada por tema (PhoneOS.renderStill), desenhada numa thread à parte na primeira vez
+	// que alguém com aquele tema aparece e de novo a cada minuto (o relógio dos widgets), e subida na thread de render. Até a primeira ficar
+	// pronta, a tela sai preta.
+	private static final int THEMES = PhoneOS.THEME_IDS.size();
+	private static final Identifier[] STILL_IDS = new Identifier[THEMES];
+	private static final LinearTexture[] STILL_TEXTURES = new LinearTexture[THEMES];
+	private static final int[][] STILL_READY = new int[THEMES][];
+	private static final boolean[] STILL_PENDING = new boolean[THEMES];
+	private static final long[] STILL_MINUTE = new long[THEMES];
+	private static final float STILL_SCALE = 1f;
+	static final int STILL_W = Math.round(PhoneOS.FACE_W * STILL_SCALE), STILL_H = Math.round(PhoneOS.FACE_H * STILL_SCALE);
+
+	/** Textura da tela parada do tema {@code index} (ordem de {@link PhoneOS#THEME_IDS}), ou null se ainda não está pronta. Thread de render. */
+	public static Identifier stillTexture(int index) {
+		if (index < 0 || index >= THEMES) {
+			index = PhoneOS.THEME_IDS.indexOf("flat");
+		}
+		long minute = System.currentTimeMillis() / 60_000L;
+		int[] ready;
+		synchronized (STILL_READY) {
+			ready = STILL_READY[index];
+			STILL_READY[index] = null;
+			if (ready == null && !STILL_PENDING[index] && STILL_MINUTE[index] != minute) {
+				STILL_PENDING[index] = true;
+				STILL_MINUTE[index] = minute;
+				drawStill(index);
+			}
+		}
+		if (ready != null) {
+			if (STILL_TEXTURES[index] == null) {
+				Identifier id = HandyPhone.id("dynamic/phone_still_" + PhoneOS.THEME_IDS.get(index));
+				LinearTexture texture = new LinearTexture("handyphone still " + PhoneOS.THEME_IDS.get(index), STILL_W, STILL_H);
+				Minecraft.getInstance().getTextureManager().register(id, texture);
+				STILL_TEXTURES[index] = texture;
+				STILL_IDS[index] = id;
+			}
+			upload(STILL_TEXTURES[index], ready);
+		}
+		return STILL_IDS[index];
+	}
+
+	private static void drawStill(int index) {
+		Thread t = new Thread(() -> {
+			int[] px;
+			try {
+				BufferedImage img = PhoneOS.renderStill(PhoneOS.THEME_IDS.get(index), STILL_SCALE);
+				px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+				toAbgr(px, px);
+			} catch (RuntimeException | LinkageError e) {
+				HandyPhone.LOGGER.warn("Couldn't draw the phone screen seen by others", e);
+				px = new int[STILL_W * STILL_H];
+				Arrays.fill(px, 0xFF000000);
+			}
+			synchronized (STILL_READY) {
+				STILL_READY[index] = px;
+				STILL_PENDING[index] = false;
+			}
+		}, "HandyPhone-Still");
+		t.setDaemon(true);
+		t.start();
 	}
 
 	/** Chamado na thread de render a cada quadro em que o celular aparece. */
@@ -113,6 +185,11 @@ public final class PhoneDisplay {
 		Minecraft.getInstance().getTextureManager().register(BODY_TEXTURE, body);
 		back = new LinearTexture("handyphone back", WIDTH, HEIGHT);
 		Minecraft.getInstance().getTextureManager().register(BACK_TEXTURE, back);
+		LinearTexture hand = new LinearTexture("handyphone cursor hand", CURSOR_HAND_PX, CURSOR_HAND_PX);
+		Minecraft.getInstance().getTextureManager().register(CURSOR_HAND_TEXTURE, hand);
+		int[] handPx = ((DataBufferInt) dev.migzu.handyphone.client.os.CursorArt.handImage(CURSOR_HAND_PX).getRaster().getDataBuffer()).getData();
+		toAbgr(handPx, handPx);
+		upload(hand, handPx);
 
 		// Textura toda branca: a malha do corpo usa só a cor dos vértices.
 		int[] white = new int[WIDTH * HEIGHT];

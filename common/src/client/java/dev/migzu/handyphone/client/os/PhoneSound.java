@@ -50,7 +50,13 @@ public enum PhoneSound {
 	/** Alguém entrou na chamada em grupo (etapa 5b). */
 	CALL_JOIN("call_join", Group.NOTIFICATION, false),
 	/** Alguém saiu da chamada em grupo (etapa 5b). */
-	CALL_LEAVE("call_leave", Group.NOTIFICATION, false);
+	CALL_LEAVE("call_leave", Group.NOTIFICATION, false),
+
+	// E. Câmera (1.3; mudam conforme o tema)
+	/** Um toque por segundo do temporizador; o último segundo tem o seu, mais agudo. */
+	CAMERA_TIMER("camera_timer", Group.UI, false),
+	CAMERA_TIMER_LAST("camera_timer_last", Group.UI, false),
+	CAMERA_SHUTTER("camera_shutter", Group.UI, false);
 
 	public enum Group {
 		/** Sons físicos do aparelho e da mão; não dependem de tema. */

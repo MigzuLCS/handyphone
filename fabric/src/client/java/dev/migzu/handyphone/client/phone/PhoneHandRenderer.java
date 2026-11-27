@@ -4,6 +4,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import dev.migzu.handyphone.client.os.PhoneOS;
+import dev.migzu.handyphone.client.mixin.GameRendererBobAccessor;
+import dev.migzu.handyphone.client.os.CursorArt;
 import dev.migzu.handyphone.client.os.PhoneSettings;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
@@ -41,6 +43,8 @@ public final class PhoneHandRenderer {
 	private static final float CURSOR_PRESSED_SCALE = 0.72f;
 	private static final int CURSOR_COLOR = 0xFFFFFFFF;
 	private static final int CURSOR_OUTLINE_COLOR = 0xFF1A1A1A;
+	/** Altura do cursor de mão, da ponta do dedo ao pulso, em pontos da tela do celular. */
+	private static final float CURSOR_HAND_H = 14f;
 
 	/** Giro extra em Y (graus), usado só pelo teste automático para fotografar a lateral e a traseira. */
 	public static volatile float debugYaw;
@@ -71,6 +75,67 @@ public final class PhoneHandRenderer {
 	private PhoneHandRenderer() {
 	}
 
+	/**
+	 * A mão desenhada pelo Iris (com pacote de shaders): ele monta a projeção como {@code projeção x tremor de dano x balanço da caminhada}
+	 * e entrega a pilha de poses zerada. Lido por reflexão (o Iris é opcional); nenhuma classe dele é carregada sem ele.
+	 */
+	static final class IrisHands {
+		private static boolean checked;
+		private static Object instance;
+		private static java.lang.reflect.Method isActive;
+
+		private IrisHands() {
+		}
+
+		/** A mesma matriz de balanço que o Iris pôs na projeção, se é ele que está desenhando a mão agora; senão null. */
+		static Matrix4f bobWhileDrawing() {
+			if (!drawing()) {
+				return null;
+			}
+			Minecraft mc = Minecraft.getInstance();
+			var camera = mc.gameRenderer.gameRenderState().levelRenderState.cameraRenderState;
+			if (camera == null) {
+				return null;
+			}
+			GameRendererBobAccessor bob = (GameRendererBobAccessor) mc.gameRenderer;
+			PoseStack stack = new PoseStack();
+			bob.handyphone$bobHurt(camera, stack);
+			if (mc.options.bobView().get()) {
+				bob.handyphone$bobView(camera, stack);
+			}
+			return new Matrix4f(stack.last().pose());
+		}
+
+		private static boolean drawing() {
+			if (!checked) {
+				checked = true;
+				try {
+					Class<?> type = Class.forName("net.irisshaders.iris.pathways.HandRenderer");
+					instance = type.getField("INSTANCE").get(null);
+					isActive = type.getMethod("isActive");
+				} catch (ReflectiveOperationException | LinkageError e) {
+					instance = null;
+				}
+			}
+			if (instance == null) {
+				return false;
+			}
+			try {
+				return (Boolean) isActive.invoke(instance);
+			} catch (ReflectiveOperationException | RuntimeException e) {
+				return false;
+			}
+		}
+	}
+
+	/** Quanto o celular desce no meio da troca de lado (em "altura do braço"; 1 já o tira de baixo da tela). */
+	private static final float MIRROR_DIP = 1.1f;
+
+	/** 0 a 1: o celular da tela a caminho do outro lado (selfie). */
+	public static float mirrorProgress() {
+		return Mth.clamp(PhoneController.INSTANCE.mirror.f(), 0f, 1f);
+	}
+
 	public static void render(
 		PoseStack poseStack, SubmitNodeCollector collector, int lightCoords, HumanoidArm arm, float inverseArmHeight, boolean showArm, ArmRenderer armRenderer
 	) {
@@ -80,6 +145,12 @@ public final class PhoneHandRenderer {
 		float e = ctrl.expand.f();
 		float e01 = Mth.clamp(e, 0f, 1f);
 		float side = arm == HumanoidArm.RIGHT ? 1f : -1f;
+		// Selfie: o celular troca de lado da tela descendo e subindo (como passar de uma mão para a outra), sem atravessar o meio à vista.
+		float m = mirrorProgress();
+		if (m > 0f) {
+			side *= (float) Math.cos(Math.PI * m);
+			inverseArmHeight += (float) Math.sin(Math.PI * m) * MIRROR_DIP;
+		}
 		// O jogo estreita o FOV da mão debaixo d'água (e na lava): sem compensar, o celular "dá zoom" e o clique, que
 		// assume o FOV normal, deixa de acertar. Esticar x e y (não z) pela razão das tangentes cancela o efeito.
 		float fovFix = (float) (Math.tan(Math.toRadians(PhoneController.handFov / 2.0)) / Math.tan(Math.toRadians(PhoneController.HAND_FOV_DEGREES / 2.0)));
@@ -88,6 +159,12 @@ public final class PhoneHandRenderer {
 		// começa com a inversa dela); o Iris desenha a mão por outro caminho, com outra vista e a pilha zerada.
 		// Ler a matriz em uso, em vez de supor a do jogo puro, mantém o expandido e o clique certos nos dois casos.
 		Matrix4f viewRot = new Matrix4f(RenderSystem.getModelViewStack());
+		// Com shader, o Iris põe o balanço da caminhada e o tremor de dano na projeção da mão, fora da pilha de poses: sem somá-los à
+		// vista, a estabilização (e o clique no expandido) não os enxergava e o celular balançava inteiro na mão.
+		Matrix4f irisBob = IrisHands.bobWhileDrawing();
+		if (irisBob != null) {
+			viewRot = irisBob.mul(viewRot);
+		}
 
 		// Na mão, o balanço da caminhada quase some (ver handSteady()); vale para o braço também, senão ele se descola do celular.
 		float handSteady = handSteady() * Mth.clamp(r, 0f, 1f);
@@ -145,31 +222,8 @@ public final class PhoneHandRenderer {
 		}
 
 		// A pilha de poses da mão ainda não inclui a rotação da câmera; as normais precisam dela.
-		Matrix3f viewNormal = new Matrix3f(viewRot);
-		// Corpo: malha sólida, sombreada pela normal de cada vértice.
-		collector.order(ORDER_BODY).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
-			for (PhoneMesh.Part part : MESH.parts) {
-				solid(viewNormal, pose, buffer, part.quads(), part.color(), lightCoords);
-			}
-		});
+		submitModel(poseStack, collector, new Matrix3f(viewRot), lightCoords, PhoneDisplay.SCREEN_TEXTURE, ORDER_BODY, ORDER_SCREEN);
 		float hw = ASPECT / 2f;
-		// Traseira (imagem espelhada, pois é vista pelo outro lado) e tela.
-		float backZ = -PhoneMesh.THICKNESS - SURFACE_GAP;
-		collector.order(ORDER_BODY).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BACK_TEXTURE), (pose, buffer) -> {
-			int color = shade(viewNormal, pose, 0f, 0f, -1f, 0xFFFFFF);
-			buffer.addVertex(pose, hw, -0.5f, backZ).setColor(color).setUv(0f, 1f).setLight(lightCoords);
-			buffer.addVertex(pose, -hw, -0.5f, backZ).setColor(color).setUv(1f, 1f).setLight(lightCoords);
-			buffer.addVertex(pose, -hw, 0.5f, backZ).setColor(color).setUv(1f, 0f).setLight(lightCoords);
-			buffer.addVertex(pose, hw, 0.5f, backZ).setColor(color).setUv(0f, 0f).setLight(lightCoords);
-		});
-		// A tela depois do corpo: os cantos arredondados da imagem são semitransparentes e precisam do corpo já desenhado embaixo.
-		collector.order(ORDER_SCREEN).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.SCREEN_TEXTURE), (pose, buffer) -> {
-			int light = LightCoordsUtil.FULL_BRIGHT;
-			buffer.addVertex(pose, -hw, -0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(0f, 1f).setLight(light);
-			buffer.addVertex(pose, hw, -0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(1f, 1f).setLight(light);
-			buffer.addVertex(pose, hw, 0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(1f, 0f).setLight(light);
-			buffer.addVertex(pose, -hw, 0.5f, SURFACE_GAP).setColor(0xFFFFFFFF).setUv(0f, 0f).setLight(light);
-		});
 		// Destaque da roda (celular na mão), no vidro: anima a cada quadro sem redesenhar a tela.
 		PhoneOS.FocusShape focus = ctrl.inHand() ? ctrl.os.focusShape() : null;
 		if (focus != null) {
@@ -186,7 +240,44 @@ public final class PhoneHandRenderer {
 	}
 
 	/**
-	 * Cruz do cursor colada no vidro: um contorno escuro e, por cima, a cruz branca (legível em qualquer papel de parede).
+	 * Corpo, traseira e tela do aparelho na pose atual (face da tela em z = 0, altura 1). Usado pela mão em primeira pessoa e pelo celular
+	 * de qualquer jogador visto em terceira pessoa ({@link PhoneWorldModel}). {@code viewNormal} leva as normais ao espaço da luz fixa do
+	 * sombreado; {@code screenTexture} null = tela apagada (preta).
+	 */
+	static void submitModel(PoseStack poseStack, SubmitNodeCollector collector, Matrix3f viewNormal, int lightCoords,
+		net.minecraft.resources.Identifier screenTexture, int bodyOrder, int screenOrder) {
+		// Corpo: malha sólida, sombreada pela normal de cada vértice.
+		collector.order(bodyOrder).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
+			for (PhoneMesh.Part part : MESH.parts) {
+				solid(viewNormal, pose, buffer, part.quads(), part.color(), lightCoords);
+			}
+		});
+		float hw = ASPECT / 2f;
+		// Traseira (imagem espelhada, pois é vista pelo outro lado) e tela.
+		float backZ = -PhoneMesh.THICKNESS - SURFACE_GAP;
+		collector.order(bodyOrder).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BACK_TEXTURE), (pose, buffer) -> {
+			int color = shade(viewNormal, pose, 0f, 0f, -1f, 0xFFFFFF);
+			buffer.addVertex(pose, hw, -0.5f, backZ).setColor(color).setUv(0f, 1f).setLight(lightCoords);
+			buffer.addVertex(pose, -hw, -0.5f, backZ).setColor(color).setUv(1f, 1f).setLight(lightCoords);
+			buffer.addVertex(pose, -hw, 0.5f, backZ).setColor(color).setUv(1f, 0f).setLight(lightCoords);
+			buffer.addVertex(pose, hw, 0.5f, backZ).setColor(color).setUv(0f, 0f).setLight(lightCoords);
+		});
+		// A tela depois do corpo: os cantos arredondados da imagem são semitransparentes e precisam do corpo já desenhado embaixo.
+		boolean dark = screenTexture == null;
+		int screenColor = dark ? 0xFF0A0A0C : 0xFFFFFFFF;
+		collector.order(screenOrder).submitCustomGeometry(poseStack, RenderTypes.text(dark ? PhoneDisplay.BODY_TEXTURE : screenTexture), (pose, buffer) -> {
+			int light = LightCoordsUtil.FULL_BRIGHT;
+			float u0 = dark ? 0.5f : 0f, u1 = dark ? 0.5f : 1f, v0 = dark ? 0.5f : 0f, v1 = dark ? 0.5f : 1f;
+			buffer.addVertex(pose, -hw, -0.5f, SURFACE_GAP).setColor(screenColor).setUv(u0, v1).setLight(light);
+			buffer.addVertex(pose, hw, -0.5f, SURFACE_GAP).setColor(screenColor).setUv(u1, v1).setLight(light);
+			buffer.addVertex(pose, hw, 0.5f, SURFACE_GAP).setColor(screenColor).setUv(u1, v0).setLight(light);
+			buffer.addVertex(pose, -hw, 0.5f, SURFACE_GAP).setColor(screenColor).setUv(u0, v0).setLight(light);
+		});
+	}
+
+	/**
+	 * Cursor colado no vidro (Ajustes > Destaque e cursor > Cursor). Cruz: um contorno escuro e, por cima, a cruz branca (legível em qualquer
+	 * papel de parede). Mão: um quad com a textura {@link PhoneDisplay#CURSOR_HAND_TEXTURE}.
 	 * Medidas em pontos da tela do celular; apertar o botão encolhe a cruz, como um toque.
 	 */
 	private static void submitCursor(SubmitNodeCollector collector, PoseStack poseStack, float[] cursor, float hw) {
@@ -197,6 +288,21 @@ public final class PhoneHandRenderer {
 		float arm = CURSOR_ARM * unit * scale;
 		float thick = CURSOR_THICK * unit;
 		float outline = CURSOR_OUTLINE * unit;
+		if (PhoneController.INSTANCE.os.settings().cursorStyle() == PhoneSettings.Cursor.HAND) {
+			// Mão: um quad com a textura; a ponta do dedo (CursorArt.HAND_HOT_*) cai no ponto do clique e é o centro do encolher.
+			float k = CURSOR_HAND_H / CursorArt.HAND_HEIGHT * unit * scale;
+			float x0 = cx - CursorArt.HAND_HOT_X * k, y0 = cy + CursorArt.HAND_HOT_Y * k;
+			float x1 = x0 + CursorArt.HAND_BOX * k, y1 = y0 - CursorArt.HAND_BOX * k;
+			collector.order(ORDER_CURSOR).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.CURSOR_HAND_TEXTURE), (pose, buffer) -> {
+				int light = LightCoordsUtil.FULL_BRIGHT;
+				float z = SURFACE_GAP * 3f;
+				buffer.addVertex(pose, x0, y1, z).setColor(0xFFFFFFFF).setUv(0f, 1f).setLight(light);
+				buffer.addVertex(pose, x1, y1, z).setColor(0xFFFFFFFF).setUv(1f, 1f).setLight(light);
+				buffer.addVertex(pose, x1, y0, z).setColor(0xFFFFFFFF).setUv(1f, 0f).setLight(light);
+				buffer.addVertex(pose, x0, y0, z).setColor(0xFFFFFFFF).setUv(0f, 0f).setLight(light);
+			});
+			return;
+		}
 		collector.order(ORDER_CURSOR).submitCustomGeometry(poseStack, RenderTypes.text(PhoneDisplay.BODY_TEXTURE), (pose, buffer) -> {
 			int light = LightCoordsUtil.FULL_BRIGHT;
 			cross(pose, buffer, cx, cy, arm + outline, thick + outline, SURFACE_GAP * 2f, CURSOR_OUTLINE_COLOR, light);

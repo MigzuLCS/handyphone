@@ -33,6 +33,30 @@ public final class PhoneSettings {
 		}
 	}
 
+	/** Desenho do cursor no modo expandido (no vidro, onde o mouse cai na tela). */
+	public enum Cursor {
+		CROSS("cross"), HAND("hand");
+
+		final String id;
+
+		Cursor(String id) {
+			this.id = id;
+		}
+
+		public String id() {
+			return id;
+		}
+
+		static Cursor of(String id) {
+			for (Cursor c : values()) {
+				if (c.id.equals(id)) {
+					return c;
+				}
+			}
+			return CROSS;
+		}
+	}
+
 	public static final int MIN_SCROLL_SPEED = 50, MAX_SCROLL_SPEED = 200;
 
 	// Aparência
@@ -41,9 +65,15 @@ public final class PhoneSettings {
 	private int accent = -1;
 	// Navegação
 	private String highlight = Highlight.FLUID.id;
-	private boolean highlightAnimated = true;
+	/**
+	 * Só para ler arquivos da 1.1 (a chave "Animação do destaque" saiu na 1.2: o estilo Simples é o parado). {@code false} vira o
+	 * Simples em {@link #normalize()} e o campo some do arquivo (o Gson não grava null).
+	 */
+	private Boolean highlightAnimated;
 	/** Cor do destaque da roda em 0xRRGGBB; -1 = automática (um tom diferente da cor de destaque, para não sumir nos botões). */
 	private int highlightColor = -1;
+	/** Cursor do modo expandido; arquivo antigo sem o campo = cruz. */
+	private String cursorStyle = Cursor.CROSS.id;
 	/** Velocidade da rolagem, em % do padrão. */
 	private int scrollSpeed = 100;
 	/** Quanto do balanço da caminhada sobra com o celular na mão, em %. */
@@ -59,6 +89,18 @@ public final class PhoneSettings {
 	// Notificações
 	private boolean notifyBanner = true;
 	private boolean notifySound = true;
+	// Privacidade (1.3): os outros jogadores veem o celular na sua mão (só o aparelho, nunca a tela). Arquivo sem o campo = ligado.
+	private boolean showToOthers = true;
+	/** Cópia das fotos que o jogador tira neste computador (1.3; ver LocalPhotos). Arquivo sem o campo = ligada. */
+	private boolean localCopies = true;
+	/** Teto da pasta de fotos deste computador, em MB (todas as pastas de servidor juntas). Só pelo arquivo. */
+	private int localPhotosMb = 500;
+	// Câmera (1.3): grade de terços no visor e temporizador do disparo (0, 3 ou 10 s). Lembrados como num celular de verdade.
+	private boolean cameraGrid = false;
+	private int cameraTimer = 0;
+
+	/** Durações do temporizador da Câmera, em segundos, na ordem do botão (0 = desligado). */
+	public static final int[] CAMERA_TIMERS = {0, 3, 10};
 
 	public PhoneSettings copy() {
 		PhoneSettings c = new PhoneSettings();
@@ -67,6 +109,7 @@ public final class PhoneSettings {
 		c.highlight = highlight;
 		c.highlightAnimated = highlightAnimated;
 		c.highlightColor = highlightColor;
+		c.cursorStyle = cursorStyle;
 		c.scrollSpeed = scrollSpeed;
 		c.handSway = handSway;
 		c.controlsHint = controlsHint;
@@ -76,6 +119,11 @@ public final class PhoneSettings {
 		c.soundTheme = soundTheme;
 		c.notifyBanner = notifyBanner;
 		c.notifySound = notifySound;
+		c.showToOthers = showToOthers;
+		c.localCopies = localCopies;
+		c.localPhotosMb = localPhotosMb;
+		c.cameraGrid = cameraGrid;
+		c.cameraTimer = cameraTimer;
 		return c;
 	}
 
@@ -89,6 +137,11 @@ public final class PhoneSettings {
 			accent &= 0xFFFFFF;
 		}
 		highlight = Highlight.of(highlight).id;
+		if (Boolean.FALSE.equals(highlightAnimated)) {
+			highlight = Highlight.SIMPLE.id;
+		}
+		highlightAnimated = null;
+		cursorStyle = Cursor.of(cursorStyle).id;
 		if (highlightColor != -1) {
 			highlightColor &= 0xFFFFFF;
 		}
@@ -96,6 +149,10 @@ public final class PhoneSettings {
 		handSway = clamp(handSway, 0, 100);
 		volume = clamp(volume, 0, 100);
 		soundTheme = soundTheme == null ? "" : soundTheme.trim();
+		localPhotosMb = clamp(localPhotosMb, 50, 20_000);
+		if (java.util.Arrays.stream(CAMERA_TIMERS).noneMatch(t -> t == cameraTimer)) {
+			cameraTimer = 0;
+		}
 		return this;
 	}
 
@@ -116,13 +173,18 @@ public final class PhoneSettings {
 		return Highlight.of(highlight);
 	}
 
+	public Cursor cursorStyle() {
+		return Cursor.of(cursorStyle);
+	}
+
 	/** -1 = automática. */
 	public int highlightColor() {
 		return highlightColor;
 	}
 
+	/** O destaque anda (ondula e cresce na troca de item): todos menos o Simples, que é parado. */
 	public boolean highlightAnimated() {
-		return highlightAnimated;
+		return highlight() != Highlight.SIMPLE;
 	}
 
 	public int scrollSpeed() {
@@ -189,20 +251,20 @@ public final class PhoneSettings {
 		return true;
 	}
 
+	boolean setCursorStyle(Cursor c) {
+		if (c.id.equals(cursorStyle)) {
+			return false;
+		}
+		cursorStyle = c.id;
+		return true;
+	}
+
 	boolean setHighlightColor(int rgb) {
 		int v = rgb == -1 ? -1 : rgb & 0xFFFFFF;
 		if (v == highlightColor) {
 			return false;
 		}
 		highlightColor = v;
-		return true;
-	}
-
-	boolean setHighlightAnimated(boolean v) {
-		if (v == highlightAnimated) {
-			return false;
-		}
-		highlightAnimated = v;
 		return true;
 	}
 
@@ -266,6 +328,19 @@ public final class PhoneSettings {
 		return true;
 	}
 
+	/** Os outros jogadores veem o celular na mão deste (Ajustes > Privacidade). */
+	public boolean showToOthers() {
+		return showToOthers;
+	}
+
+	boolean setShowToOthers(boolean v) {
+		if (v == showToOthers) {
+			return false;
+		}
+		showToOthers = v;
+		return true;
+	}
+
 	boolean setNotifyBanner(boolean v) {
 		if (v == notifyBanner) {
 			return false;
@@ -279,6 +354,47 @@ public final class PhoneSettings {
 			return false;
 		}
 		notifySound = v;
+		return true;
+	}
+
+	public boolean localCopies() {
+		return localCopies;
+	}
+
+	boolean setLocalCopies(boolean v) {
+		if (v == localCopies) {
+			return false;
+		}
+		localCopies = v;
+		return true;
+	}
+
+	public int localPhotosMb() {
+		return localPhotosMb;
+	}
+
+	public boolean cameraGrid() {
+		return cameraGrid;
+	}
+
+	boolean setCameraGrid(boolean v) {
+		if (v == cameraGrid) {
+			return false;
+		}
+		cameraGrid = v;
+		return true;
+	}
+
+	/** Segundos do temporizador da Câmera (0 = desligado). */
+	public int cameraTimer() {
+		return cameraTimer;
+	}
+
+	boolean setCameraTimer(int seconds) {
+		if (seconds == cameraTimer || java.util.Arrays.stream(CAMERA_TIMERS).noneMatch(t -> t == seconds)) {
+			return false;
+		}
+		cameraTimer = seconds;
 		return true;
 	}
 }

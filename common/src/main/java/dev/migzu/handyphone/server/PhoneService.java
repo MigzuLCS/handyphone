@@ -194,6 +194,11 @@ public final class PhoneService {
 		long lastActivity;
 		/** Já foi para a thread de processamento; o espaço do jogador só libera quando o resultado voltar. */
 		boolean processing;
+		/** Onde o jogador estava ao começar o envio de uma foto da câmera (null = sem local: do computador ou offline). */
+		String dim;
+		int x;
+		int y;
+		int z;
 	}
 
 	/** Orçamento de bytes de download (balde de fichas). */
@@ -250,6 +255,8 @@ public final class PhoneService {
 	private PhoneConfig config = new PhoneConfig();
 	/** Localização: mapa, mensagens com ponto, compartilhamento ao vivo e locais salvos. */
 	private final LocationService location;
+	/** Celular visto de fora: quem está com ele na mão, repassado a quem está perto. */
+	private final PoseService poses;
 	/** Ligações de voz (precisam do Simple Voice Chat). */
 	private final CallService calls;
 	private boolean photosAvailable = true;
@@ -295,6 +302,7 @@ public final class PhoneService {
 		this.photos = new PhotoStore(dir);
 		this.location = new LocationService(this);
 		this.calls = new CallService(this);
+		this.poses = new PoseService(this);
 	}
 
 	// ------------------------------------------------------------------ eventos da plataforma
@@ -370,6 +378,7 @@ public final class PhoneService {
 			service.downloadBuckets.remove(uuid);
 			service.location.onDisconnect(uuid);
 			service.calls.onDisconnect(uuid);
+			service.poses.onDisconnect(uuid);
 		}
 	}
 
@@ -396,6 +405,7 @@ public final class PhoneService {
 	private void tick() {
 		location.tick();
 		calls.tick();
+		poses.tick();
 		if (++tickCounter % 100 == 0) {
 			sweepUploads(System.currentTimeMillis());
 		}
@@ -692,6 +702,17 @@ public final class PhoneService {
 		return server.player(uuid);
 	}
 
+	/** Todos os jogadores ligados agora. */
+	java.util.Collection<? extends PhonePlayer> onlinePlayers() {
+		return server.players();
+	}
+
+	/** Só para os testes: a pose do celular de um jogador, como o servidor a guarda (ver {@link PoseService}). */
+	public static int poseOf(UUID uuid) {
+		PhoneService service = instance;
+		return service == null ? PhonePayloads.POSE_NONE : service.poses.poseOf(uuid);
+	}
+
 	/** Número de 6 dígitos ainda não usado; passa para 7 se a faixa estiver ficando cheia. */
 	private String newNumber() {
 		int digits = byNumber.size() < 400_000 ? 6 : 7;
@@ -848,8 +869,11 @@ public final class PhoneService {
 			}
 		}
 		if (service.locked) {
-			notice(player, "handyphone.notice.unavailable");
-			return;
+			// A pose do celular sai a cada puxada, sem o jogador pedir nada: não vale um aviso a cada vez (ela nem depende dos dados).
+			if (!(packet instanceof PhonePayloads.PhonePose)) {
+				notice(player, "handyphone.notice.unavailable");
+				return;
+			}
 		}
 		route.handler().handle(service, player, packet);
 	}
@@ -870,6 +894,8 @@ public final class PhoneService {
 		route(PhonePayloads.UploadEnd.TYPE, 0.5, (s, pl, p) -> s.onUploadEnd(pl, p));
 		route(PhonePayloads.PhotoGet.TYPE, 0.05, (s, pl, p) -> s.onPhotoGet(pl, p));
 		route(PhonePayloads.PhotoDelete.TYPE, 1, (s, pl, p) -> s.onPhotoDelete(pl, p));
+		route(PhonePayloads.PhotoDeleteMany.TYPE, 6, (s, pl, p) -> s.onPhotoDeleteMany(pl, p));
+		route(PhonePayloads.PhotoInfoGet.TYPE, 0.5, (s, pl, p) -> s.onPhotoInfoGet(pl, p));
 		route(PhonePayloads.SendPhoto.TYPE, 2, (s, pl, p) -> s.onSendPhoto(pl, p));
 		route(PhonePayloads.TileGet.TYPE, 0.05, (s, pl, p) -> s.location.onTileGet(pl, p));
 		route(PhonePayloads.SendLocation.TYPE, 2, (s, pl, p) -> s.location.onSendLocation(pl, p));
@@ -887,6 +913,8 @@ public final class PhoneService {
 		route(PhonePayloads.CallAnswer.TYPE, 1, (s, pl, p) -> s.calls.answer(pl.getUUID(), p.id()));
 		route(PhonePayloads.CallDecline.TYPE, 1, (s, pl, p) -> s.calls.decline(pl.getUUID(), p.id()));
 		// O mudo refaz o retrato de voz e avisa os dois lados: custa mais que um clique.
+		// Pose do celular (1.3): o cliente só manda quando muda; barato, mas no orçamento como todo o resto.
+		route(PhonePayloads.PhonePose.TYPE, 0.5, (s, pl, p) -> s.poses.onPose(pl, p));
 		route(PhonePayloads.CallMute.TYPE, 3, (s, pl, p) -> s.calls.mute(pl.getUUID(), p.id(), p.on()));
 	}
 
@@ -957,7 +985,7 @@ public final class PhoneService {
 		Conversation conversation = memberConversation(player, packet.conversation());
 		PhotoStore.Photo photo = photos.get(packet.photo());
 		// Só dá para mandar uma foto da própria galeria: encaminhar a de outra pessoa prenderia a cota dela.
-		if (conversation == null || photo == null || !photo.owner.equals(player.getUUID())) {
+		if (conversation == null || photo == null || !photo.owner.equals(player.getUUID()) || photo.hidden) {
 			notice(player, "handyphone.notice.photo_gone");
 			return;
 		}
@@ -1490,6 +1518,11 @@ public final class PhoneService {
 			refs.remove(conversation);
 			if (refs.isEmpty()) {
 				photoRefs.remove(photo);
+				// Apagada pelo dono e agora fora de todas as conversas: o arquivo pode ir embora.
+				PhotoStore.Photo stored = photos.get(photo);
+				if (stored != null && stored.hidden) {
+					photos.remove(stored);
+				}
 			}
 		}
 	}
@@ -1777,6 +1810,14 @@ public final class PhoneService {
 		upload.total = total;
 		upload.format = format;
 		upload.source = source;
+		// O local da foto da câmera é carimbado aqui, pelo servidor (o cliente não diz onde estava): o jogador acabou de disparar.
+		PhonePlayer at = source == PhonePayloads.SOURCE_IMPORT ? null : server.player(who);
+		if (at != null) {
+			upload.dim = at.dimension();
+			upload.x = (int) Math.floor(at.getX());
+			upload.y = (int) Math.floor(at.getY());
+			upload.z = (int) Math.floor(at.getZ());
+		}
 		upload.buffer = new byte[total];
 		upload.lastActivity = now;
 		uploads.put(who, upload);
@@ -1791,6 +1832,12 @@ public final class PhoneService {
 		long used = photos.usedBytes(who), quota = config.quotaBytes();
 		if (used + extra > quota) {
 			return refusal("handyphone.notice.photo.gallery_space", mb(used), mb(quota));
+		}
+		// Fotos apagadas que seguem em conversas não contam na cota (apagar devolve o espaço), mas têm um teto do mesmo tamanho: sem
+		// ele, mandar, apagar e mandar de novo encheria o espaço do servidor inteiro. Passou do teto, só depois de a conversa largá-las.
+		long hidden = photos.hiddenBytes(who);
+		if (used + hidden + extra > 2 * quota) {
+			return refusal("handyphone.notice.photo.gallery_space", mb(used + hidden), mb(2 * quota));
 		}
 		if (photos.totalBytes() + extra > config.totalBytes()) {
 			return refusal("handyphone.notice.photo.server_full");
@@ -1901,7 +1948,7 @@ public final class PhoneService {
 			try {
 				PhotoStore.Photo photo = photos.register(
 					id, who, PhotoCodec.FORMAT_JPEG, stored.full().length, stored.thumb().length, stored.width(), stored.height(),
-					upload.source == PhonePayloads.SOURCE_IMPORT
+					upload.source == PhonePayloads.SOURCE_IMPORT, upload.dim, upload.x, upload.y, upload.z
 				);
 				HandyPhoneCore.LOGGER.info(
 					"Photo {} uploaded by {} ({} bytes, {}x{}, source {})", photo.id, who, photo.size, photo.width, photo.height,
@@ -1999,10 +2046,76 @@ public final class PhoneService {
 
 	private void onPhotoDelete(PhonePlayer player, PhonePayloads.PhotoDelete packet) {
 		PhotoStore.Photo photo = photos.get(packet.id());
-		if (photo != null && photo.owner.equals(player.getUUID())) {
-			photos.remove(photo);
-			photoRefs.remove(photo.id);
+		if (photo != null && photo.owner.equals(player.getUUID()) && !photo.hidden) {
+			deleteFromGallery(photo);
 			sendGallery(player);
+		}
+	}
+
+	/**
+	 * Informações da foto (1.3). Quem não pode vê-la não recebe nada (o mesmo silêncio para "não existe" e "não é sua"). O local vai só
+	 * para o dono: mandar uma foto numa conversa não entrega onde ela foi tirada.
+	 */
+	private void onPhotoInfoGet(PhonePlayer player, PhonePayloads.PhotoInfoGet packet) {
+		PhotoStore.Photo photo = photos.get(packet.id());
+		if (photo == null || !canView(player.getUUID(), photo)) {
+			return;
+		}
+		boolean owner = photo.owner.equals(player.getUUID());
+		String dim = owner && photo.dim != null ? photo.dim : "";
+		send(player, new PhonePayloads.PhotoInfo(photo.id, photo.time, photo.width, photo.height, photo.size, photo.imported, dim,
+			dim.isEmpty() ? 0 : photo.x, dim.isEmpty() ? 0 : photo.y, dim.isEmpty() ? 0 : photo.z));
+	}
+
+	/** Só para os testes: as informações que o servidor mandaria a {@code who} sobre a foto, ou null se não mandaria nada. */
+	public static PhonePayloads.PhotoInfo photoInfoFor(UUID who, long id) {
+		PhoneService service = instance;
+		PhotoStore.Photo photo = service != null ? service.photos.get(id) : null;
+		if (photo == null || !service.canView(who, photo)) {
+			return null;
+		}
+		boolean owner = photo.owner.equals(who);
+		String dim = owner && photo.dim != null ? photo.dim : "";
+		return new PhonePayloads.PhotoInfo(photo.id, photo.time, photo.width, photo.height, photo.size, photo.imported, dim,
+			dim.isEmpty() ? 0 : photo.x, dim.isEmpty() ? 0 : photo.y, dim.isEmpty() ? 0 : photo.z);
+	}
+
+	/** Várias de uma vez (seleção na Galeria): as que não são do jogador ou não existem são ignoradas em silêncio, como no pacote de uma. */
+	private void onPhotoDeleteMany(PhonePlayer player, PhonePayloads.PhotoDeleteMany packet) {
+		boolean changed = false;
+		int n = 0;
+		for (long id : packet.ids()) {
+			if (++n > PhonePayloads.MAX_DELETE_MANY) {
+				break;
+			}
+			PhotoStore.Photo photo = photos.get(id);
+			if (photo != null && photo.owner.equals(player.getUUID()) && !photo.hidden) {
+				deleteFromGallery(photo, false);
+				changed = true;
+			}
+		}
+		if (changed) {
+			// O índice do jogador é gravado uma vez só, não uma por foto (cada gravação é o arquivo inteiro, na thread do servidor).
+			photos.flushIndex(player.getUUID());
+			sendGallery(player);
+		}
+	}
+
+	/**
+	 * Apagar da galeria (1.3): a foto sai da galeria e do espaço do dono na hora. Se ainda está em alguma conversa, o arquivo fica para
+	 * quem recebeu (como apagar a foto da galeria de um celular) e some quando nenhuma conversa a usar mais ({@link #removeRef}).
+	 */
+	private void deleteFromGallery(PhotoStore.Photo photo) {
+		deleteFromGallery(photo, true);
+	}
+
+	private void deleteFromGallery(PhotoStore.Photo photo, boolean writeIndex) {
+		Map<Long, Integer> refs = photoRefs.get(photo.id);
+		if (refs != null && !refs.isEmpty()) {
+			photos.hide(photo, writeIndex);
+		} else {
+			photos.remove(photo, writeIndex);
+			photoRefs.remove(photo.id);
 		}
 	}
 
@@ -2027,7 +2140,8 @@ public final class PhoneService {
 			service.data.nextPhotoId = id + 1;
 			service.accountsDirty = true;
 			service.photos.writeFiles(id, PhotoCodec.FORMAT_JPEG, stored.full(), stored.thumb());
-			service.photos.register(id, owner, PhotoCodec.FORMAT_JPEG, stored.full().length, stored.thumb().length, stored.width(), stored.height(), false);
+			service.photos.register(id, owner, PhotoCodec.FORMAT_JPEG, stored.full().length, stored.thumb().length, stored.width(), stored.height(), false,
+				null, 0, 0, 0);
 			PhonePlayer online = service.server.player(owner);
 			if (online != null) {
 				service.sendGallery(online);
@@ -2043,7 +2157,7 @@ public final class PhoneService {
 		PhoneService service = instance;
 		UUID target = service != null && !service.locked ? service.byNumber.get(digits(toNumber)) : null;
 		PhotoStore.Photo photo = service != null ? service.photos.get(photoId) : null;
-		if (target == null || target.equals(sender) || photo == null || !photo.owner.equals(sender)) {
+		if (target == null || target.equals(sender) || photo == null || !photo.owner.equals(sender) || photo.hidden) {
 			return false;
 		}
 		numberFor(sender);
@@ -2143,11 +2257,10 @@ public final class PhoneService {
 	public static boolean deletePhoto(UUID owner, long id) {
 		PhoneService service = instance;
 		PhotoStore.Photo photo = service != null ? service.photos.get(id) : null;
-		if (photo == null || !photo.owner.equals(owner)) {
+		if (photo == null || !photo.owner.equals(owner) || photo.hidden) {
 			return false;
 		}
-		service.photos.remove(photo);
-		service.photoRefs.remove(id);
+		service.deleteFromGallery(photo);
 		PhonePlayer online = service.server.player(owner);
 		if (online != null) {
 			service.sendGallery(online);
@@ -2421,10 +2534,10 @@ public final class PhoneService {
 		proof.put("quando", stamp);
 		proof.put("mensagens", messageLog);
 		proof.put("locais", account.places);
-		List<PhotoStore.Photo> gallery = photos.gallery(target);
+		List<PhotoStore.Photo> gallery = photos.all(target);
 		List<Object> photoLog = new ArrayList<>();
 		for (PhotoStore.Photo photo : gallery) {
-			photoLog.add(Map.of("id", photo.id, "hora", photo.time, "bytes", photo.size, "doComputador", photo.imported));
+			photoLog.add(Map.of("id", photo.id, "hora", photo.time, "bytes", photo.size, "doComputador", photo.imported, "apagadaPeloDono", photo.hidden));
 		}
 		proof.put("fotos", photoLog);
 		try {
@@ -2818,13 +2931,26 @@ public final class PhoneService {
 		data.nextPhotoId = Math.max(data.nextPhotoId, photos.maxIdOnDisk() + 1);
 
 		loadConversations();
+		// Fotos apagadas pelo dono que nenhuma conversa usa mais (por exemplo, a conversa foi apagada com o servidor desligado). Só com
+		// TODAS as conversas lidas: uma conversa ilegível (ou guardada como corrompida, que o dono pode restaurar) ainda pode usar a foto.
+		if (conversationsClean && !locked) {
+			for (PhotoStore.Photo photo : photos.hiddenPhotos()) {
+				if (!photoRefs.containsKey(photo.id)) {
+					photos.remove(photo);
+				}
+			}
+		}
 		HandyPhoneCore.LOGGER.info(
 			"HandyPhone: loaded {} accounts, {} conversations and {} photos{}", data.accounts.size(), conversations.size(), photos.totalCount(),
 			locked ? " (LOCKED: unreadable accounts)" : ""
 		);
 	}
 
+	/** A última leitura das conversas terminou sem nenhum arquivo ilegível ou guardado como corrompido (ver a limpeza de fotos ocultas). */
+	private boolean conversationsClean;
+
 	private void loadConversations() {
+		conversationsClean = true;
 		Path folder = dir.resolve("conversations");
 		if (!Files.isDirectory(folder)) {
 			return;
@@ -2835,6 +2961,7 @@ public final class PhoneService {
 			files = listing.toList();
 		} catch (IOException e) {
 			HandyPhoneCore.LOGGER.error("HandyPhone: couldn't list the conversations in {}", folder, e);
+			conversationsClean = false;
 			return;
 		}
 		// Ler e interpretar cada arquivo é o que demora (o sistema de arquivos, sobretudo com antivírus): feito em paralelo; o resto, na ordem.
@@ -2848,6 +2975,9 @@ public final class PhoneService {
 			}
 			if (name.endsWith(".json")) {
 				readable.add(file);
+			} else if (name.contains(".json.")) {
+				// Uma cópia de conversa corrompida (ou um temporário que sobrou): pode ser restaurada e usar fotos.
+				conversationsClean = false;
 			}
 		}
 		for (LoadedConversation entry : readConversations(readable)) {
@@ -2859,6 +2989,7 @@ public final class PhoneService {
 				HandyPhoneCore.LOGGER.error("HandyPhone: corrupted conversation: {}", file, entry.error());
 			}
 			if (conversation == null || conversation.members == null || conversation.messages == null) {
+				conversationsClean = false;
 				Path kept = locked ? null : moveAside(file);
 				HandyPhoneCore.LOGGER.error("HandyPhone: unreadable conversation skipped: {}{}", file, kept != null ? " (copy at " + kept + ")" : "");
 				continue;

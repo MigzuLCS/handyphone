@@ -53,6 +53,11 @@ public final class PhoneController {
 	public final Spring raise = new Spring(0, 190, 20);
 	/** 0 = na mão, 1 = expandido no centro da tela. */
 	public final Spring expand = new Spring(0, 230, 23);
+	/**
+	 * 0 = na mão de sempre, 1 = do outro lado da tela (selfie, 1.3): na selfie a câmera olha para o jogador e o braço que segura o celular
+	 * aparece do lado oposto; o celular da tela vai para lá, como num espelho, e o personagem segue com ele na mão de sempre.
+	 */
+	public final Spring mirror = new Spring(0, 150, 23);
 
 	/** Animação de puxada sorteada na última vez que o celular foi levantado. */
 	private PullAnimations.Variant pull = PullAnimations.pick();
@@ -93,6 +98,26 @@ public final class PhoneController {
 			}
 		});
 		os.setClipboard(text -> Minecraft.getInstance().execute(() -> Minecraft.getInstance().keyboardHandler.setClipboard(text)));
+		// Fotos neste computador (1.3): cópias das fotos tiradas e a galeria de servidores sem o mod, uma pasta por servidor.
+		java.nio.file.Path localPhotos = Minecraft.getInstance().gameDirectory.toPath().resolve("handyphone").resolve("photos");
+		os.setLocalPhotoRoot(localPhotos, () -> Minecraft.getInstance().execute(() -> {
+			try {
+				java.nio.file.Files.createDirectories(localPhotos);
+				com.mojang.blaze3d.Blaze3D.openUri(localPhotos.toUri());
+			} catch (java.io.IOException | RuntimeException e) {
+				HandyPhone.LOGGER.warn("Couldn't open {}", localPhotos, e);
+			}
+		}));
+		// Salvar no computador (1.3): ao lado das capturas de tela do jogo; tocar no aviso abre a pasta.
+		java.nio.file.Path exports = Minecraft.getInstance().gameDirectory.toPath().resolve("screenshots").resolve("handyphone");
+		os.setExportFolder(exports, () -> Minecraft.getInstance().execute(() -> {
+			try {
+				java.nio.file.Files.createDirectories(exports);
+				com.mojang.blaze3d.Blaze3D.openUri(exports.toUri());
+			} catch (java.io.IOException | RuntimeException e) {
+				HandyPhone.LOGGER.warn("Couldn't open {}", exports, e);
+			}
+		}));
 		os.setModVersion(FabricLoader.getInstance().getModContainer(HandyPhone.MOD_ID)
 			.map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse(""));
 		os.setCamera(PhoneCameraSource.INSTANCE);
@@ -414,6 +439,8 @@ public final class PhoneController {
 		}
 		raise.step(dt);
 		expand.step(dt);
+		mirror.target = PhoneLens.selfie() ? 1 : 0;
+		mirror.step(dt);
 		pullProgress = (float) Math.min(1.0, pullProgress + dt / pull.seconds());
 		if (!isShown()) {
 			// O celular acabou de sumir: o item da mão sobe como numa troca de slot, sem pular na tela.
@@ -421,6 +448,7 @@ public final class PhoneController {
 			// A mola pode ter parado perto de zero ainda com velocidade; sem isto a próxima puxada afundaria um pouco antes de subir.
 			raise.snap(0);
 			expand.snap(0);
+			mirror.snap(0);
 			LocalPlayer player = Minecraft.getInstance().player;
 			if (player != null) {
 				player.itemUsed(InteractionHand.MAIN_HAND);

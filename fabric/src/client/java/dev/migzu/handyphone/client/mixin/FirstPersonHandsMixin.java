@@ -63,7 +63,9 @@ public abstract class FirstPersonHandsMixin {
 		final CallbackInfo ci
 	) {
 		PhoneController ctrl = PhoneController.INSTANCE;
-		if (hand != InteractionHand.MAIN_HAND || !ctrl.isShown() || state.isScoping) {
+		// Câmera em outra entidade (espectador assistindo alguém): a mão desenhada não é a do jogador; o celular dele não vai nela.
+		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+		if (hand != InteractionHand.MAIN_HAND || !ctrl.isShown() || state.isScoping || mc.getCameraEntity() != mc.player) {
 			return;
 		}
 		AvatarRenderState avatar = playerState.avatarRenderState;
@@ -71,6 +73,9 @@ public abstract class FirstPersonHandsMixin {
 			return;
 		}
 		HumanoidArm arm = avatar.mainArm;
+		// Selfie: do outro lado da tela o celular fica sem braço (o braço esticado do personagem já aparece na cena; os dois juntos
+		// disputavam a imagem). Some no meio da troca de lado, quando o celular está abaixo da tela.
+		boolean mirrored = PhoneHandRenderer.mirrorProgress() >= 0.5f;
 		poseStack.pushPose();
 		PhoneHandRenderer.render(
 			poseStack,
@@ -80,7 +85,7 @@ public abstract class FirstPersonHandsMixin {
 			// Sobe de baixo da tela ao puxar e desce ao guardar, como uma troca de item; o valor do jogo
 			// (que cai quando o item da mão muda ou ao atacar) não serve, senão o celular mergulharia.
 			1f - ctrl.raise.f(),
-			!avatar.isInvisible,
+			!avatar.isInvisible && !mirrored,
 			(stack, armHeight) -> this.renderPlayerArm(stack, submitNodeCollector, lightCoords, armHeight, 0.0F, arm, playerState)
 		);
 		poseStack.popPose();

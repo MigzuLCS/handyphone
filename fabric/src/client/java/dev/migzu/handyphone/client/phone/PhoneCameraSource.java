@@ -164,6 +164,14 @@ public final class PhoneCameraSource implements PhoneCamera {
 		return deferred;
 	}
 
+	/**
+	 * Selfie com shader: a câmera do jogo fica solta e o Iris não desenha a mão em primeira pessoa nesse caso; o celular (com o visor)
+	 * sumiria da tela. Então o caminho do jogo puro o desenha, como as mãos adiadas (sem o sombreamento do shader, como no resto da Câmera).
+	 */
+	public boolean selfieHandsWithShader() {
+		return PhoneLens.selfie() && shaderPackInUse();
+	}
+
 	/** O mixin marca o desenho das mãos adiadas, para {@link #shouldDeferHands} não as adiar de novo. */
 	public void deferredHandsPass(boolean on) {
 		inDeferredPass = on;

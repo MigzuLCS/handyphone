@@ -17,8 +17,11 @@ final class PhotoViewer {
 	private final AppContent host;
 	private long photoId;
 	private boolean ownPhoto;
+	/** Quem mandou a foto (número), quando aberta numa conversa; vazio na Galeria. */
+	private String sender = "";
+	/** Painel de informações aberto (botão "i"). */
+	private boolean infoOpen;
 	/** O primeiro toque em "Apagar" só arma; o segundo apaga de verdade. */
-	private boolean deleteArmed;
 	/** Zoom (1 = a foto inteira cabe na tela, até {@link #MAX_ZOOM}) e deslocamento da foto ampliada, em pontos da tela. */
 	private float zoom = 1f, panX, panY;
 	/** Arrastando a foto ampliada: último ponto do dedo. */
@@ -35,8 +38,14 @@ final class PhotoViewer {
 	}
 
 	void open(long id, PhoneOS os) {
+		open(id, os, "");
+	}
+
+	/** Abre a foto; {@code from} é o número de quem a mandou (nas Mensagens), ou vazio. */
+	void open(long id, PhoneOS os, String from) {
+		sender = from == null ? "" : from;
+		infoOpen = false;
 		photoId = id;
-		deleteArmed = false;
 		zoom = 1f;
 		panX = panY = 0f;
 		dragging = false;
@@ -102,7 +111,8 @@ final class PhotoViewer {
 	 */
 	void draw(Graphics2D g, PhoneOS os, float x, float y, float w, float h, Color accent, Runnable onSend, Runnable onDelete) {
 		boolean mine = ownPhoto;
-		float barH = mine ? 28 : 0;
+		// Fotos da galeria: Enviar, Salvar e Apagar. Fotos recebidas numa conversa: só Salvar (1.3).
+		float barH = 28;
 		g.setColor(new Color(0x101014));
 		g.fill(new java.awt.geom.Rectangle2D.Float(x, y, w, h - barH));
 
@@ -117,6 +127,10 @@ final class PhotoViewer {
 				drawZoomed(g, shown, boxX, boxY, boxW, boxH);
 			}
 		}
+		drawInfoButton(g, os, boxX + boxW - 14, boxY + 12);
+		if (infoOpen) {
+			drawInfo(g, os, boxX, boxY, boxW, boxH);
+		}
 		g.setFont(Ui.font(Font.PLAIN, 8.2f));
 		g.setColor(new Color(0xB9BCC8));
 		if (os.data.photos.isGone(photoId)) {
@@ -126,21 +140,117 @@ final class PhotoViewer {
 			Ui.centered(g, Lang.t("handyphone.photo.viewer.loading") + dots, x + w / 2f, y + h - barH - 8);
 		}
 
+		long id = photoId;
+		float by = y + h - barH + 3, bx = x + 6;
 		if (!mine) {
+			float bw = w - 12;
+			button(g, "viewer-save", Lang.t("handyphone.gallery.action.save"), bx, by, bw, 22, new Color(0x5B6170), () -> os.exportPhotos(java.util.List.of(id)));
 			return;
 		}
-		float by = y + h - barH + 3, bw = (w - 18) / 2f;
-		float bx = x + 6;
-		button(g, "viewer-send", Lang.t("handyphone.photo.viewer.send"), bx, by, bw, 22, accent, onSend);
-		boolean armed = deleteArmed;
-		button(g, "viewer-delete", Lang.t(armed ? "handyphone.photo.viewer.delete_confirm" : "handyphone.photo.viewer.delete"), bx + bw + 6, by, bw, 22, armed ? new Color(0xC62828) : new Color(0x7B7F8C), () -> {
-			if (!deleteArmed) {
-				deleteArmed = true;
-				return;
+		// Fotos só deste computador (servidor sem o mod) não vão para conversa nenhuma: só Salvar e Apagar.
+		boolean canSend = !os.localOnly();
+		float bw = canSend ? (w - 24) / 3f : (w - 18) / 2f;
+		if (canSend) {
+			button(g, "viewer-send", Lang.t("handyphone.photo.viewer.send"), bx, by, bw, 22, accent, onSend);
+			bx += bw + 6;
+		}
+		button(g, "viewer-save", Lang.t("handyphone.gallery.action.save"), bx, by, bw, 22, new Color(0x5B6170), () -> os.exportPhotos(java.util.List.of(id)));
+		button(g, "viewer-delete", Lang.t("handyphone.photo.viewer.delete"), bx + bw + 6, by, bw, 22, new Color(0x7B7F8C), () ->
+			os.confirm(Lang.plural("handyphone.gallery.delete.title", 1),
+				Lang.t(os.localOnly() ? "handyphone.gallery.delete.message_local" : "handyphone.gallery.delete.message"),
+				Lang.t("handyphone.gallery.action.delete"), true, () -> {
+					os.deletePhoto(id);
+					onDelete.run();
+				}));
+	}
+
+	/** Botão "i" redondo no canto da foto: abre e fecha o painel de informações. */
+	private void drawInfoButton(Graphics2D g, PhoneOS os, float cx, float cy) {
+		float r = 8f;
+		boolean down = host.hit("viewer-info", cx - r - 3, cy - r - 3, 2 * r + 6, 2 * r + 6, PhoneSound.BUTTON, () -> infoOpen = !infoOpen);
+		g.setColor(infoOpen ? Color.WHITE : new Color(0, 0, 0, down ? 170 : 120));
+		g.fill(new java.awt.geom.Ellipse2D.Float(cx - r, cy - r, 2 * r, 2 * r));
+		g.setColor(infoOpen ? new Color(0x15151A) : Color.WHITE);
+		g.setStroke(new java.awt.BasicStroke(1.1f));
+		if (!infoOpen) {
+			g.draw(new java.awt.geom.Ellipse2D.Float(cx - r, cy - r, 2 * r, 2 * r));
+		}
+		g.fill(new java.awt.geom.Ellipse2D.Float(cx - 1.05f, cy - 4.6f, 2.1f, 2.1f));
+		g.fill(new RoundRectangle2D.Float(cx - 0.95f, cy - 1.4f, 1.9f, 6f, 1.6f, 1.6f));
+	}
+
+	/**
+	 * Painel no pé da foto: data, tamanho, origem, quem mandou (nas Mensagens) e, só para o dono e só de fotos da câmera, onde foi tirada.
+	 * Sem resposta do servidor (antigo, ou ainda chegando), mostra o que o celular já sabe.
+	 */
+	private void drawInfo(Graphics2D g, PhoneOS os, float x, float y, float w, float h) {
+		PhoneData.PhotoInfo info = os.photoInfo(photoId);
+		long time = info != null ? info.time() : 0;
+		int bytes = info != null ? info.size() : 0;
+		for (PhoneData.GalleryPhoto p : os.data.gallery) {
+			if (p.id() == photoId) {
+				time = time == 0 ? p.time() : time;
+				bytes = bytes == 0 ? p.size() : bytes;
 			}
-			os.deletePhoto(photoId);
-			onDelete.run();
-		});
+		}
+		java.util.List<String[]> rows = new java.util.ArrayList<>();
+		if (time > 0) {
+			java.time.ZonedDateTime when = java.time.Instant.ofEpochMilli(time).atZone(java.time.ZoneId.systemDefault());
+			rows.add(new String[] {Lang.t("handyphone.photo.info.date"),
+				Lang.format("handyphone.format.date.full").format(when) + " · " + Lang.format("handyphone.format.time").format(when)});
+		}
+		if (!sender.isEmpty()) {
+			rows.add(new String[] {Lang.t("handyphone.photo.info.from"), os.data.displayName(sender)});
+		}
+		if (info != null && info.width() > 0) {
+			rows.add(new String[] {Lang.t("handyphone.photo.info.size"),
+				Lang.t("handyphone.photo.info.size_value", String.valueOf(info.width()), String.valueOf(info.height()), kb(bytes))});
+		} else if (bytes > 0) {
+			rows.add(new String[] {Lang.t("handyphone.photo.info.size"), kb(bytes)});
+		}
+		if (info != null) {
+			rows.add(new String[] {Lang.t("handyphone.photo.info.source"),
+				Lang.t(info.imported() ? "handyphone.photo.info.source.computer" : "handyphone.photo.info.source.camera")});
+		}
+		boolean place = info != null && info.hasPlace();
+		if (place) {
+			rows.add(new String[] {Lang.t("handyphone.photo.info.place"),
+				Lang.t("handyphone.photo.info.place_value", String.valueOf(info.x()), String.valueOf(info.y()), String.valueOf(info.z()))});
+			rows.add(new String[] {"", Geo.dimensionName(info.dimension())});
+		}
+		float lineH = 13f, pad = 8f;
+		float panelH = pad * 2 + 12 + rows.size() * lineH + (place ? 11 : 0);
+		float py = y + h - panelH - 4, px = x + 4, pw = w - 8;
+		g.setColor(new Color(20, 20, 26, 225));
+		g.fill(new RoundRectangle2D.Float(px, py, pw, panelH, 10, 10));
+		g.setColor(Color.WHITE);
+		g.setFont(Ui.font(Font.BOLD, 8.6f));
+		Ui.text(g, Lang.t("handyphone.photo.info.title"), px + pad, py + pad + 7);
+		float ly = py + pad + 12 + 9;
+		float labelW = 0;
+		g.setFont(Ui.font(Font.PLAIN, 7.4f));
+		for (String[] row : rows) {
+			labelW = Math.max(labelW, Ui.textWidth(g, row[0]));
+		}
+		for (String[] row : rows) {
+			g.setFont(Ui.font(Font.PLAIN, 7.4f));
+			g.setColor(new Color(0x9EA2B0));
+			Ui.text(g, row[0], px + pad, ly);
+			g.setColor(new Color(0xF0F1F5));
+			g.setFont(Ui.font(Font.PLAIN, 7.6f));
+			float vx = px + pad + labelW + 8;
+			Ui.text(g, AppContent.fit(g, row[1], px + pw - pad - vx), vx, ly);
+			ly += lineH;
+		}
+		if (place) {
+			g.setFont(Ui.font(Font.PLAIN, 6.6f));
+			g.setColor(new Color(0x8A8E9C));
+			Ui.text(g, Lang.t("handyphone.photo.info.private"), px + pad, ly - 1);
+		}
+	}
+
+	private static String kb(int bytes) {
+		return Lang.t("handyphone.size.kb", String.valueOf(Math.max(1, Math.round(bytes / 1024f))));
 	}
 
 	/** A foto ampliada, recortada na área da foto; o deslocamento é limitado para a borda da foto não entrar na área. */
