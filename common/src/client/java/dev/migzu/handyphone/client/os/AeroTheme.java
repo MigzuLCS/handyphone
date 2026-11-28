@@ -42,7 +42,7 @@ final class AeroTheme extends Theme {
 	private static final int COLS = 4;
 	private static final float ICON = 32f;
 	private static final float HERO_Y = SY + STATUS_H + 8f, HERO_H = 96f;
-	private static final float GRID_Y = HERO_Y + HERO_H + 16f;
+	private static final float GRID_Y = HERO_Y + HERO_H + 16f, GRID_ROW = 58f;
 	private static final float DOCK_Y = SY + SH - 51f;
 	private static final float HEADER_H = 26f;
 	// Botão físico de início, na moldura de baixo.
@@ -84,7 +84,10 @@ final class AeroTheme extends Theme {
 	private static float[] iconRect(PhoneOS os, int i) {
 		float gap = (SW - COLS * ICON) / (COLS + 1);
 		float x = SX + gap + slot(os, i) % COLS * (ICON + gap);
-		return new float[] {x, os.apps.get(i).dock() ? DOCK_Y : GRID_Y};
+		if (os.apps.get(i).dock()) {
+			return new float[] {x, DOCK_Y};
+		}
+		return new float[] {x, GRID_Y + slot(os, i) / COLS * GRID_ROW};
 	}
 
 	@Override

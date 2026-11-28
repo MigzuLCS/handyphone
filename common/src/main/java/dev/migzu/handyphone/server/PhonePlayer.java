@@ -41,4 +41,9 @@ public interface PhonePlayer {
 	int blockZ();
 
 	boolean isSpectator();
+
+	/** Tem a permissão de administrador do celular (Fabric: nível 3, como {@code /kick}; Paper: {@code handyphone.admin})? */
+	default boolean isAdmin() {
+		return false;
+	}
 }

@@ -89,7 +89,13 @@ final class RetroTheme extends Theme {
 			float w = SW / 4f;
 			return new float[] {SX + slot * w, BAR_Y, w, BAR_H};
 		}
-		return new float[] {SX, SIDE_TOP - 6 + slot * SIDE_STEP, SIDE_W, SIDE_STEP};
+		float step = sideStep(os);
+		return new float[] {SX, SIDE_TOP - 6 + slot * step, SIDE_W, step};
+	}
+
+	/** Distância entre os apps da barra lateral: 64 com 4 apps; com o scroll.in (5) ficam mais juntos para caber acima do dock. */
+	private static float sideStep(PhoneOS os) {
+		return Math.min(SIDE_STEP, (BAR_Y - SIDE_TOP - 2) / Math.max(1, gridCount(os)));
 	}
 
 	@Override
@@ -109,7 +115,7 @@ final class RetroTheme extends Theme {
 		if (os.apps.get(i).dock()) {
 			return new float[] {SX + (slot + 0.5f) * SW / 4f, BAR_Y + 19 + DOCK_ICON / 2f};
 		}
-		return new float[] {SX + SIDE_W / 2f, SIDE_TOP + slot * SIDE_STEP + SIDE_ICON / 2f};
+		return new float[] {SX + SIDE_W / 2f, SIDE_TOP + slot * sideStep(os) + SIDE_ICON / 2f};
 	}
 
 	@Override

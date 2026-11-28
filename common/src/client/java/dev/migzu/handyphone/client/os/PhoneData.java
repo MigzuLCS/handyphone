@@ -240,6 +240,86 @@ public final class PhoneData {
 	public record GalleryPhoto(long id, long time, int size) {
 	}
 
+	// ---- scroll.in (1.4: fotos públicas do servidor)
+	/** O servidor já disse se o scroll.in existe aqui? Sem isso (servidor antigo ou sem o mod) o ícone não aparece. */
+	public boolean feedInfoReceived;
+	/** O scroll.in está ligado neste servidor. */
+	public boolean feedAvailable;
+	/** Tamanho máximo da legenda e do comentário que o servidor aceita. */
+	public int feedMaxCaption = 256, feedMaxComment = 150;
+	/** Só fotos da Câmera podem ser publicadas (o servidor confere; o celular só esconde as outras). */
+	public boolean feedCameraOnly = true;
+	/** O id de autor do próprio jogador e o nome com que ele aparece (para abrir o próprio perfil). */
+	public String feedMe = "", feedMeName = "";
+	/** O jogador é administrador do servidor (o menu da publicação mostra o id, para o comando de remover). */
+	public boolean feedAdmin;
+	/** Fotos da galeria que podem ser publicadas, ou null enquanto o servidor não respondeu. */
+	public java.util.Set<Long> feedEligible;
+	/** O feed de todos, do mais novo para o mais antigo (só as páginas já baixadas). */
+	public final FeedList feed = new FeedList();
+	/** Publicações de um perfil (quem foi tocado por último). */
+	public final FeedList profile = new FeedList();
+	/** Comentários já baixados, por publicação. */
+	public final java.util.Map<Long, List<FeedComment>> feedComments = new java.util.HashMap<>();
+
+	/**
+	 * Uma publicação. {@code author} é um id opaco do autor (nunca o número); {@code name} é o que se mostra.
+	 * {@code mine}: é do próprio jogador (pode apagar).
+	 */
+	public record FeedPost(long id, String author, String name, long time, String caption, long photo, int likes, boolean liked, int comments,
+		boolean mine) {
+	}
+
+	/** Um comentário; {@code mine} = do próprio jogador (pode apagar). */
+	public record FeedComment(long id, String author, String name, long time, String text, boolean mine) {
+	}
+
+	/** Uma lista paginada do feed (o de todos ou o de um perfil). */
+	public static final class FeedList {
+		/** Autor do perfil (vazio = o feed de todos). */
+		public String author = "";
+		public String name = "";
+		public final List<FeedPost> posts = new ArrayList<>();
+		/** O servidor tem mais páginas depois da última. */
+		public boolean more;
+		/** Já chegou ao menos uma página. */
+		public boolean loaded;
+		/** Uma página foi pedida e ainda não chegou. */
+		public boolean loading;
+		/** Quando o pedido saiu (relógio do PhoneOS): sem resposta em alguns segundos (pacote descartado), dá para pedir de novo. */
+		public double loadingAt;
+
+		public void clear() {
+			posts.clear();
+			more = false;
+			loaded = false;
+			loading = false;
+		}
+
+		/** Troca uma publicação já baixada pela versão nova (curtida, comentário). */
+		public boolean replace(FeedPost post) {
+			for (int i = 0; i < posts.size(); i++) {
+				if (posts.get(i).id() == post.id()) {
+					posts.set(i, post);
+					return true;
+				}
+			}
+			return false;
+		}
+
+		public FeedPost find(long id) {
+			for (FeedPost p : posts) {
+				if (p.id() == id) {
+					return p;
+				}
+			}
+			return null;
+		}
+	}
+
+	/** Publicações guardadas por lista no cliente (o servidor manda páginas pequenas). */
+	public static final int MAX_FEED_POSTS = 300;
+
 	public static final class Conversation {
 		public long id;
 		public boolean group;

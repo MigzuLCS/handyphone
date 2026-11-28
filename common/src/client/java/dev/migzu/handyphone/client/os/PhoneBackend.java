@@ -56,6 +56,42 @@ public interface PhoneBackend {
 		ids.forEach(this::deletePhoto);
 	}
 
+	// ---- scroll.in (1.4). Servidor antigo: nada (o ícone nem aparece sem o FeedInfo do servidor).
+
+	/** Pede uma página do feed: {@code author} vazio = todos; senão as publicações daquele autor. {@code before} = id da última que o celular tem (0 = do começo). */
+	default void feedGet(String author, long before) {
+	}
+
+	/** Pede os ids das fotos da galeria que podem ser publicadas. */
+	default void feedEligible() {
+	}
+
+	/** Publica uma foto da galeria com uma legenda. */
+	default void feedPublish(long photo, String caption) {
+	}
+
+	/** Curte ({@code on}) ou desfaz a curtida. Leva o estado, não um "alternar": repetir não muda nada. */
+	default void feedLike(long post, boolean on) {
+	}
+
+	/** Pede os comentários de uma publicação. */
+	default void feedComments(long post) {
+	}
+
+	default void feedComment(long post, String text) {
+	}
+
+	default void feedCommentDelete(long post, long comment) {
+	}
+
+	/** Apaga uma publicação própria (a foto continua na galeria). */
+	default void feedDelete(long post) {
+	}
+
+	/** Denuncia uma publicação para os administradores (ela some do feed de quem denunciou). */
+	default void feedReport(long post) {
+	}
+
 	/** Manda, em uma conversa, uma foto da galeria. */
 	void sendPhoto(long conversation, long photo);
 

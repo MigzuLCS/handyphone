@@ -313,7 +313,7 @@ final class GalleryApp extends AppContent {
 		actionButton(g, "sel:delete", Lang.t("handyphone.gallery.action.delete"), x + 3 * MARGIN + 2 * bw, by, bw, bh, n > 0 ? new Color(0xC62828) : null, () -> {
 			List<Long> ids = List.copyOf(selected);
 			os.confirm(Lang.plural("handyphone.gallery.delete.title", ids.size()),
-				Lang.t(os.localOnly() ? "handyphone.gallery.delete.message_local" : "handyphone.gallery.delete.message"),
+				Lang.t(os.localOnly() ? "handyphone.gallery.delete.message_local" : os.data.feedAvailable ? "handyphone.gallery.delete.message_feed" : "handyphone.gallery.delete.message"),
 				Lang.t("handyphone.gallery.action.delete"), true, () -> {
 					os.deletePhotos(ids);
 					endSelection();

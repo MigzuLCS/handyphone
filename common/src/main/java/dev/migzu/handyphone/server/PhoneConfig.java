@@ -29,11 +29,15 @@ public final class PhoneConfig {
 		+ "(camera, gallery, sending in a chat); photos already in conversations can still be downloaded by the people in them; to remove "
 		+ "content use /handyphone wipe. | The server owner can read everything: messages, photos and places are stored as unencrypted JSON "
 		+ "and JPEG files in <world>/handyphone/. | If this file has a JSON error, live location, map, location messages, computer upload, "
-		+ "photos and calls are turned OFF until you fix it (see the server log). | Calls: they need the Simple Voice Chat mod (on the server "
+		+ "photos, calls and scroll.in are turned OFF until you fix it (see the server log). | Calls: they need the Simple Voice Chat mod (on the server "
 		+ "and on every player); without it the Phone app says calls aren't available. Call audio is relayed by the server and is NOT "
 		+ "recorded. crossDimensionCalls=false stops people in another dimension from hearing the call. Muting someone (/handyphone mute) "
 		+ "also removes their voice from calls. Call audio passes through the server (which, with another plugin, could record it): "
-		+ "this mod records nothing. | 'Busy' and 'declined' tell the caller that the number is online (only callers who were not blocked).";
+		+ "this mod records nothing. | 'Busy' and 'declined' tell the caller that the number is online (only callers who were not blocked). | "
+		+ "scroll.in (publicFeed): photos posted there are seen by EVERYONE on the server; the post never carries where the photo was taken. "
+		+ "feedPhotoSource=camera (default) only accepts photos taken with the phone Camera; like allowComputerUpload this is a CONVENIENCE, not "
+		+ "protection (a modified client can claim a picture came from the camera). feedPhotoSource=any also accepts pictures from the computer. "
+		+ "Moderation: /handyphone post remove <id>, /handyphone reports, and /handyphone wipe also removes posts, likes and comments.";
 
 	/**
 	 * Aceita fotos enviadas do computador (arrastar ou colar). Desligado, o servidor
@@ -87,6 +91,18 @@ public final class PhoneConfig {
 	public int maxCallParticipants = 8;
 	/** Segundos que a ligação toca antes de virar "não atendeu". */
 	public int ringSeconds = 30;
+
+	/** Liga o scroll.in (fotos públicas para o servidor todo, 1.4). Desligado, o servidor recusa tudo e o ícone some do celular. */
+	public boolean publicFeed = true;
+	/**
+	 * De onde podem vir as fotos publicadas: {@code camera} (padrão) = só as tiradas com a Câmera do celular; {@code any} = também as do
+	 * computador. É conveniência, não proteção: um cliente modificado pode declarar "câmera" (como no {@link #allowComputerUpload}).
+	 */
+	public String feedPhotoSource = "camera";
+	/** Publicações por jogador a cada 24 horas. */
+	public int feedPostsPerDay = 10;
+	/** Publicações no servidor todo (no máximo 10.000); passando disso, as mais antigas saem do feed (a foto continua na galeria do dono). */
+	public int feedMaxPosts = 2000;
 
 	/**
 	 * Verdadeiro se o arquivo existe mas não pôde ser lido (JSON inválido): as opções sensíveis estão
@@ -153,6 +169,8 @@ public final class PhoneConfig {
 		config.photosEnabled = false;
 		// Ligações também: o dono pode tê-las desligado, e um erro de vírgula não pode ligá-las de volta.
 		config.callsEnabled = false;
+		// O feed é público: um erro de vírgula não pode ligá-lo de volta.
+		config.publicFeed = false;
 		config.failedClosed = true;
 		return config;
 	}
@@ -167,5 +185,10 @@ public final class PhoneConfig {
 		maxSavedPlaces = Math.max(1, Math.min(maxSavedPlaces, 100));
 		maxCallParticipants = Math.max(2, Math.min(maxCallParticipants, 32));
 		ringSeconds = Math.max(5, Math.min(ringSeconds, 120));
+		if (!"any".equals(feedPhotoSource)) {
+			feedPhotoSource = "camera";
+		}
+		feedPostsPerDay = Math.max(1, Math.min(feedPostsPerDay, 200));
+		feedMaxPosts = Math.max(10, Math.min(feedMaxPosts, 10_000));
 	}
 }

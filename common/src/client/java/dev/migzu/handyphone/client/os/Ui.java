@@ -7,6 +7,7 @@ import java.awt.Graphics2D;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
+import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 
 /** Utilidades de desenho compartilhadas pelos temas. */
@@ -156,10 +157,39 @@ final class Ui {
 				g.setColor(hole);
 				g.fill(new Ellipse2D.Float(13.6f, 13.6f, 6.8f, 6.8f));
 			}
+			case "feed" -> feedGlyph(g, fg, hole);
 			default -> {
 				g.fill(new Ellipse2D.Float(15, 7.5f, 4.4f, 4.4f));
 				g.fill(new RoundRectangle2D.Float(15, 14, 4.4f, 13, 3, 3));
 			}
 		}
+	}
+
+	/** Coração com centro em {@code (cx, cy)} e largura {@code size}. */
+	static Path2D heart(float cx, float cy, float size) {
+		float s = size / 2f;
+		Path2D p = new Path2D.Float();
+		p.moveTo(cx, cy + s * 0.95f);
+		p.curveTo(cx - s * 0.35f, cy + s * 0.6f, cx - s, cy + s * 0.1f, cx - s, cy - s * 0.35f);
+		p.curveTo(cx - s, cy - s * 0.95f, cx - s * 0.3f, cy - s * 1.1f, cx, cy - s * 0.55f);
+		p.curveTo(cx + s * 0.3f, cy - s * 1.1f, cx + s, cy - s * 0.95f, cx + s, cy - s * 0.35f);
+		p.curveTo(cx + s, cy + s * 0.1f, cx + s * 0.35f, cy + s * 0.6f, cx, cy + s * 0.95f);
+		p.closePath();
+		return p;
+	}
+
+	/** Ícone do scroll.in (escolha do Migzu, 2026-11-27): polaroid inclinada com um morro de blocos e o sol quadrado. */
+	private static void feedGlyph(Graphics2D g, Color fg, Color hole) {
+		java.awt.geom.AffineTransform t = g.getTransform();
+		g.rotate(Math.toRadians(-11), 17, 17);
+		g.fill(new RoundRectangle2D.Float(7.5f, 5.5f, 19, 23, 2.5f, 2.5f));
+		g.setColor(hole);
+		g.fill(new Rectangle2D.Float(9.8f, 7.8f, 14.4f, 13.4f));
+		g.setColor(fg);
+		g.fill(new Rectangle2D.Float(9.8f, 17.6f, 14.4f, 3.6f));
+		g.fill(new Rectangle2D.Float(9.8f, 14f, 3.6f, 3.6f));
+		g.fill(new Rectangle2D.Float(13.4f, 15.8f, 3.6f, 1.8f));
+		g.fill(new Rectangle2D.Float(19.4f, 9.6f, 2.8f, 2.8f));
+		g.setTransform(t);
 	}
 }

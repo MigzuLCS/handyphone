@@ -85,6 +85,7 @@ final class PhotoStore {
 	private final List<Path> pendingDeletes = new ArrayList<>();
 	/** Maior id visto em disco (índices e arquivos), para nunca reaproveitar um id depois de uma queda. */
 	private long maxIdOnDisk;
+	private boolean clean;
 
 	PhotoStore(Path handyphoneDir) {
 		this.dir = handyphoneDir.resolve("photos");
@@ -307,7 +308,9 @@ final class PhotoStore {
 	 * se todos os índices foram lidos sem erro, apaga arquivos soltos (restos de uma queda).
 	 */
 	void load() {
+		clean = false;
 		if (!Files.isDirectory(dir)) {
+			clean = true;
 			return;
 		}
 		boolean allIndexesOk = true;
@@ -380,6 +383,12 @@ final class PhotoStore {
 		if (orphans > 0) {
 			HandyPhoneCore.LOGGER.info("HandyPhone: deleted {} stray photo files", orphans);
 		}
+		clean = allIndexesOk;
+	}
+
+	/** A última leitura viu todos os índices sem erro? Só então "a foto não existe" é verdade (e não um índice ilegível). */
+	boolean loadedClean() {
+		return clean;
 	}
 
 	private Path indexPath(UUID owner) {

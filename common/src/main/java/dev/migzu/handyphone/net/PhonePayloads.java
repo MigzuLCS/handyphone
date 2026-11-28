@@ -1458,6 +1458,385 @@ public final class PhonePayloads {
 		}
 	}
 
+	// ------------------------------------------------------------------ scroll.in (1.4: fotos públicas)
+
+	/** Tamanho máximo da legenda de uma publicação e de um comentário. */
+	public static final int MAX_CAPTION = 256, MAX_COMMENT = 150;
+	/** Tamanho máximo do id opaco de um autor no feed (nunca o número nem o UUID). */
+	public static final int MAX_AUTHOR = 16;
+	/** Publicações por página do feed. */
+	public static final int FEED_PAGE = 10;
+	/** Comentários por publicação que o servidor guarda (e manda). */
+	public static final int MAX_COMMENTS = 200;
+	/** Tipos de {@link FeedActivity}. */
+	public static final int FEED_LIKE = 0, FEED_COMMENT = 1, FEED_REPORT = 2;
+
+	/** Uma publicação vista por quem pede: {@code liked} e {@code mine} são desse ponto de vista. */
+	public record FeedPostEntry(long id, String author, String name, long time, String caption, long photo, int likes, boolean liked, int comments,
+		boolean mine) {
+	}
+
+	/** Um comentário visto por quem pede. */
+	public record FeedCommentEntry(long id, String author, String name, long time, String text, boolean mine) {
+	}
+
+	private static FeedPostEntry readFeedPost(PhoneBuf b) {
+		return new FeedPostEntry(b.readVarLong(), b.readUtf(MAX_AUTHOR), b.readUtf(MAX_NAME), b.readLong(), b.readUtf(MAX_CAPTION), b.readVarLong(),
+			b.readVarInt(), b.readBoolean(), b.readVarInt(), b.readBoolean());
+	}
+
+	private static void writeFeedPost(PhoneBuf b, FeedPostEntry p) {
+		b.writeVarLong(p.id());
+		b.writeUtf(p.author(), MAX_AUTHOR);
+		b.writeUtf(p.name(), MAX_NAME);
+		b.writeLong(p.time());
+		b.writeUtf(p.caption(), MAX_CAPTION);
+		b.writeVarLong(p.photo());
+		b.writeVarInt(p.likes());
+		b.writeBoolean(p.liked());
+		b.writeVarInt(p.comments());
+		b.writeBoolean(p.mine());
+	}
+
+	/** O scroll.in existe neste servidor? (sem este pacote, servidor antigo, o celular nem mostra o ícone). Também os limites, quem é o próprio jogador no feed e se ele é administrador (vê o id das publicações). */
+	public record FeedInfo(boolean available, boolean cameraOnly, int maxCaption, int maxComment, String me, String meName, boolean admin) implements Payload {
+		public static final PacketType<FeedInfo> TYPE = PacketType.of("feed_info", FeedInfo::new);
+
+		private FeedInfo(PhoneBuf buf) {
+			this(buf.readBoolean(), buf.readBoolean(), buf.readVarInt(), buf.readVarInt(), buf.readUtf(MAX_AUTHOR), buf.readUtf(MAX_NAME), buf.readBoolean());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeBoolean(available);
+			buf.writeBoolean(cameraOnly);
+			buf.writeVarInt(maxCaption);
+			buf.writeVarInt(maxComment);
+			buf.writeUtf(me, MAX_AUTHOR);
+			buf.writeUtf(meName, MAX_NAME);
+			buf.writeBoolean(admin);
+		}
+
+		@Override
+		public PacketType<FeedInfo> type() {
+			return TYPE;
+		}
+	}
+
+	/** Uma página do feed (autor vazio = de todos) que responde a um {@link FeedGet}. */
+	public record FeedPage(String author, long before, List<FeedPostEntry> posts, boolean more) implements Payload {
+		public static final PacketType<FeedPage> TYPE = PacketType.of("feed_page", FeedPage::new);
+
+		public FeedPage {
+			posts = List.copyOf(posts);
+		}
+
+		private FeedPage(PhoneBuf buf) {
+			this(buf.readUtf(MAX_AUTHOR), buf.readVarLong(), readList(buf, PhonePayloads::readFeedPost), buf.readBoolean());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeUtf(author, MAX_AUTHOR);
+			buf.writeVarLong(before);
+			writeList(buf, posts, PhonePayloads::writeFeedPost);
+			buf.writeBoolean(more);
+		}
+
+		@Override
+		public PacketType<FeedPage> type() {
+			return TYPE;
+		}
+	}
+
+	/** Uma publicação mudou (curtida, comentário) do ponto de vista de quem recebe. */
+	public record FeedPost(FeedPostEntry entry) implements Payload {
+		public static final PacketType<FeedPost> TYPE = PacketType.of("feed_post", FeedPost::new);
+
+		private FeedPost(PhoneBuf buf) {
+			this(readFeedPost(buf));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			writeFeedPost(buf, entry);
+		}
+
+		@Override
+		public PacketType<FeedPost> type() {
+			return TYPE;
+		}
+	}
+
+	/** Uma publicação saiu (apagada, removida por um administrador, a foto saiu). */
+	public record FeedGone(long id) implements Payload {
+		public static final PacketType<FeedGone> TYPE = PacketType.of("feed_gone", FeedGone::new);
+
+		private FeedGone(PhoneBuf buf) {
+			this(buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(id);
+		}
+
+		@Override
+		public PacketType<FeedGone> type() {
+			return TYPE;
+		}
+	}
+
+	/** Os comentários de uma publicação que quem pede pode ver, do mais antigo ao mais novo. */
+	public record FeedComments(long post, List<FeedCommentEntry> comments) implements Payload {
+		public static final PacketType<FeedComments> TYPE = PacketType.of("feed_comments", FeedComments::new);
+
+		public FeedComments {
+			comments = List.copyOf(comments);
+		}
+
+		private FeedComments(PhoneBuf buf) {
+			this(buf.readVarLong(), readList(buf, b -> new FeedCommentEntry(b.readVarLong(), b.readUtf(MAX_AUTHOR), b.readUtf(MAX_NAME), b.readLong(), b.readUtf(MAX_COMMENT), b.readBoolean())));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+			writeList(buf, comments, (b, c) -> {
+				b.writeVarLong(c.id());
+				b.writeUtf(c.author(), MAX_AUTHOR);
+				b.writeUtf(c.name(), MAX_NAME);
+				b.writeLong(c.time());
+				b.writeUtf(c.text(), MAX_COMMENT);
+				b.writeBoolean(c.mine());
+			});
+		}
+
+		@Override
+		public PacketType<FeedComments> type() {
+			return TYPE;
+		}
+	}
+
+	/** As fotos da galeria do jogador que podem ser publicadas. */
+	public record FeedEligible(List<Long> ids) implements Payload {
+		public static final PacketType<FeedEligible> TYPE = PacketType.of("feed_eligible", FeedEligible::new);
+
+		public FeedEligible {
+			ids = List.copyOf(ids);
+		}
+
+		private FeedEligible(PhoneBuf buf) {
+			this(readList(buf, PhoneBuf::readVarLong));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			writeList(buf, ids, PhoneBuf::writeVarLong);
+		}
+
+		@Override
+		public PacketType<FeedEligible> type() {
+			return TYPE;
+		}
+	}
+
+	/** Alguém curtiu ou comentou uma publicação do jogador (vira aviso no topo). */
+	public record FeedActivity(int kind, String name, long post) implements Payload {
+		public static final PacketType<FeedActivity> TYPE = PacketType.of("feed_activity", FeedActivity::new);
+
+		private FeedActivity(PhoneBuf buf) {
+			this(buf.readVarInt(), buf.readUtf(MAX_NAME), buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarInt(kind);
+			buf.writeUtf(name, MAX_NAME);
+			buf.writeVarLong(post);
+		}
+
+		@Override
+		public PacketType<FeedActivity> type() {
+			return TYPE;
+		}
+	}
+
+	/** Pede uma página: {@code author} vazio = todos; {@code before} = a última publicação que o celular tem (0 = do começo). */
+	public record FeedGet(String author, long before) implements Payload {
+		public static final PacketType<FeedGet> TYPE = PacketType.of("feed_get", FeedGet::new);
+
+		private FeedGet(PhoneBuf buf) {
+			this(buf.readUtf(MAX_AUTHOR), buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeUtf(author, MAX_AUTHOR);
+			buf.writeVarLong(before);
+		}
+
+		@Override
+		public PacketType<FeedGet> type() {
+			return TYPE;
+		}
+	}
+
+	/** Pede as fotos da galeria que podem ser publicadas. */
+	public record FeedEligibleGet() implements Payload {
+		public static final PacketType<FeedEligibleGet> TYPE = PacketType.of("feed_eligible_get", FeedEligibleGet::new);
+
+		private FeedEligibleGet(PhoneBuf buf) {
+			this();
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+		}
+
+		@Override
+		public PacketType<FeedEligibleGet> type() {
+			return TYPE;
+		}
+	}
+
+	/** Publica uma foto da própria galeria com uma legenda. */
+	public record FeedPublish(long photo, String caption) implements Payload {
+		public static final PacketType<FeedPublish> TYPE = PacketType.of("feed_publish", FeedPublish::new);
+
+		private FeedPublish(PhoneBuf buf) {
+			this(buf.readVarLong(), buf.readUtf(MAX_CAPTION));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(photo);
+			buf.writeUtf(caption, MAX_CAPTION);
+		}
+
+		@Override
+		public PacketType<FeedPublish> type() {
+			return TYPE;
+		}
+	}
+
+	/** Curte ou desfaz: leva o estado, não um alternar (repetir não muda nada). */
+	public record FeedLike(long post, boolean on) implements Payload {
+		public static final PacketType<FeedLike> TYPE = PacketType.of("feed_like", FeedLike::new);
+
+		private FeedLike(PhoneBuf buf) {
+			this(buf.readVarLong(), buf.readBoolean());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+			buf.writeBoolean(on);
+		}
+
+		@Override
+		public PacketType<FeedLike> type() {
+			return TYPE;
+		}
+	}
+
+	/** Pede os comentários de uma publicação. */
+	public record FeedCommentsGet(long post) implements Payload {
+		public static final PacketType<FeedCommentsGet> TYPE = PacketType.of("feed_comments_get", FeedCommentsGet::new);
+
+		private FeedCommentsGet(PhoneBuf buf) {
+			this(buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+		}
+
+		@Override
+		public PacketType<FeedCommentsGet> type() {
+			return TYPE;
+		}
+	}
+
+	/** Comenta. */
+	public record FeedComment(long post, String text) implements Payload {
+		public static final PacketType<FeedComment> TYPE = PacketType.of("feed_comment", FeedComment::new);
+
+		private FeedComment(PhoneBuf buf) {
+			this(buf.readVarLong(), buf.readUtf(MAX_COMMENT));
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+			buf.writeUtf(text, MAX_COMMENT);
+		}
+
+		@Override
+		public PacketType<FeedComment> type() {
+			return TYPE;
+		}
+	}
+
+	/** Apaga um comentário próprio. */
+	public record FeedCommentDelete(long post, long comment) implements Payload {
+		public static final PacketType<FeedCommentDelete> TYPE = PacketType.of("feed_comment_delete", FeedCommentDelete::new);
+
+		private FeedCommentDelete(PhoneBuf buf) {
+			this(buf.readVarLong(), buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+			buf.writeVarLong(comment);
+		}
+
+		@Override
+		public PacketType<FeedCommentDelete> type() {
+			return TYPE;
+		}
+	}
+
+	/** Denuncia uma publicação aos administradores (ela some do feed de quem denunciou). */
+	public record FeedReport(long post) implements Payload {
+		public static final PacketType<FeedReport> TYPE = PacketType.of("feed_report", FeedReport::new);
+
+		private FeedReport(PhoneBuf buf) {
+			this(buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+		}
+
+		@Override
+		public PacketType<FeedReport> type() {
+			return TYPE;
+		}
+	}
+
+	/** Apaga uma publicação própria (a foto fica na galeria). */
+	public record FeedDelete(long post) implements Payload {
+		public static final PacketType<FeedDelete> TYPE = PacketType.of("feed_delete", FeedDelete::new);
+
+		private FeedDelete(PhoneBuf buf) {
+			this(buf.readVarLong());
+		}
+
+		@Override
+		public void write(PhoneBuf buf) {
+			buf.writeVarLong(post);
+		}
+
+		@Override
+		public PacketType<FeedDelete> type() {
+			return TYPE;
+		}
+	}
+
 	/** Pacotes do servidor para o celular, na ordem em que a plataforma os registra. */
 	public static final List<PacketType<?>> TO_CLIENT = List.of(
 		Sync.TYPE,
@@ -1479,7 +1858,14 @@ public final class PhonePayloads {
 		CallUpdate.TYPE,
 		CallLog.TYPE,
 		PhonePoses.TYPE,
-		PhotoInfo.TYPE
+		PhotoInfo.TYPE,
+		FeedInfo.TYPE,
+		FeedPage.TYPE,
+		FeedPost.TYPE,
+		FeedGone.TYPE,
+		FeedComments.TYPE,
+		FeedEligible.TYPE,
+		FeedActivity.TYPE
 	);
 
 	/** Pacotes do celular para o servidor, na ordem em que a plataforma os registra. */
@@ -1515,7 +1901,16 @@ public final class PhonePayloads {
 		CallMute.TYPE,
 		PhonePose.TYPE,
 		PhotoDeleteMany.TYPE,
-		PhotoInfoGet.TYPE
+		PhotoInfoGet.TYPE,
+		FeedGet.TYPE,
+		FeedEligibleGet.TYPE,
+		FeedPublish.TYPE,
+		FeedLike.TYPE,
+		FeedCommentsGet.TYPE,
+		FeedComment.TYPE,
+		FeedCommentDelete.TYPE,
+		FeedDelete.TYPE,
+		FeedReport.TYPE
 	);
 
 	/** Um pacote do celular: sabe o próprio tipo e se escreve no formato do jogo. */

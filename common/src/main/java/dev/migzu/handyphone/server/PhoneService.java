@@ -252,6 +252,10 @@ public final class PhoneService {
 	private final Set<Long> dirtyConversations = new HashSet<>();
 
 	private PhotoStore photos;
+	/** O scroll.in (1.4). */
+	private FeedService feed;
+	/** Chave do feed no mapa de referências de fotos ({@link #photoRefs}): as conversas usam ids positivos. */
+	static final long FEED_REF = -1L;
 	private PhoneConfig config = new PhoneConfig();
 	/** Localização: mapa, mensagens com ponto, compartilhamento ao vivo e locais salvos. */
 	private final LocationService location;
@@ -303,6 +307,7 @@ public final class PhoneService {
 		this.location = new LocationService(this);
 		this.calls = new CallService(this);
 		this.poses = new PoseService(this);
+		this.feed = new FeedService(this);
 	}
 
 	// ------------------------------------------------------------------ eventos da plataforma
@@ -362,6 +367,7 @@ public final class PhoneService {
 			service.location.onJoin(player);
 			service.calls.onJoin(player);
 			service.sendCallLog(player);
+			service.feed.onJoin(player);
 		}
 	}
 
@@ -379,6 +385,7 @@ public final class PhoneService {
 			service.location.onDisconnect(uuid);
 			service.calls.onDisconnect(uuid);
 			service.poses.onDisconnect(uuid);
+			service.feed.onDisconnect(uuid);
 		}
 	}
 
@@ -610,6 +617,36 @@ public final class PhoneService {
 		return server;
 	}
 
+	/** As opções do dono do servidor (instância; o {@code config()} estático é para os testes). */
+	PhoneConfig settings() {
+		return config;
+	}
+
+	Path dir() {
+		return dir;
+	}
+
+	PhotoStore photoStore() {
+		return photos;
+	}
+
+	/** Fotos ligadas neste servidor (configuração e ImageIO). */
+	boolean photosOn() {
+		return config.photosEnabled && photosAvailable;
+	}
+
+	void addPhotoRef(long photo, long holder) {
+		addRef(photo, holder);
+	}
+
+	void removePhotoRef(long photo, long holder) {
+		removeRef(photo, holder);
+	}
+
+	Path quarantineCopy(Path file) {
+		return quarantine(file);
+	}
+
 	/** Onde a conta está agora (a entidade dela, ou o que os testes escolheram), ou null. */
 	LocationService.Pos locationOf(UUID who) {
 		return location.positionOf(who);
@@ -683,6 +720,49 @@ public final class PhoneService {
 			}
 		}
 		return out;
+	}
+
+	/** Testes no jogo: uma conta (fora do jogo) publica uma foto da galeria dela no scroll.in. Devolve o id da publicação, ou -1. */
+	public static long feedPublishAs(UUID who, String name, long photo, String caption) {
+		PhoneService service = instance;
+		if (service == null) {
+			return -1;
+		}
+		List<Long> before = service.feed.postIds();
+		service.feed.onPublish(FeedService.actor(who, name), new PhonePayloads.FeedPublish(photo, caption));
+		List<Long> after = service.feed.postIds();
+		return after.size() > before.size() ? after.get(after.size() - 1) : -1;
+	}
+
+	/** Testes no jogo: uma conta curte uma publicação. */
+	public static void feedLikeAs(UUID who, String name, long post, boolean on) {
+		if (instance != null) {
+			instance.feed.onLike(FeedService.actor(who, name), new PhonePayloads.FeedLike(post, on));
+		}
+	}
+
+	/** Testes no jogo: uma conta comenta. */
+	public static void feedCommentAs(UUID who, String name, long post, String text) {
+		if (instance != null) {
+			instance.feed.onComment(FeedService.actor(who, name), new PhonePayloads.FeedComment(post, text));
+		}
+	}
+
+	/** Testes no jogo: as publicações no ar, da mais antiga à mais nova. */
+	public static List<Long> feedPosts() {
+		return instance == null ? List.of() : instance.feed.postIds();
+	}
+
+	/** Testes no jogo: quantas curtidas e comentários (guardados) uma publicação tem, ou null. */
+	public static int[] feedCounts(long post) {
+		FeedService.Post p = instance == null ? null : instance.feed.post(post);
+		return p == null ? null : new int[] {p.likes.size(), p.comments.size()};
+	}
+
+	/** O scroll.in do serviço no ar (testes do mesmo pacote), ou null. */
+	static FeedService feedService() {
+		PhoneService service = instance;
+		return service == null ? null : service.feed;
 	}
 
 	/** O relógio das janelas de frequência (os testes o trocam). */
@@ -767,7 +847,7 @@ public final class PhoneService {
 	 */
 	private static final String[] RESERVED_KEYS = {
 		"handyphone.you", "handyphone.app.map", "handyphone.app.contacts", "handyphone.app.settings", "handyphone.app.about",
-		"handyphone.app.phone", "handyphone.app.messages", "handyphone.app.camera", "handyphone.app.gallery", "handyphone.banner.notice",
+		"handyphone.app.phone", "handyphone.app.messages", "handyphone.app.camera", "handyphone.app.gallery", "handyphone.app.feed", "handyphone.banner.notice",
 		"handyphone.banner.photos", "handyphone.banner.blocked", "handyphone.banner.call", "handyphone.banner.missed_call",
 		"handyphone.preview.photo", "handyphone.preview.location", "handyphone.preview.pin", "handyphone.preview.place",
 		"handyphone.preview.empty", "handyphone.photo.deleted", "handyphone.chat.default_title"
@@ -916,6 +996,16 @@ public final class PhoneService {
 		// Pose do celular (1.3): o cliente só manda quando muda; barato, mas no orçamento como todo o resto.
 		route(PhonePayloads.PhonePose.TYPE, 0.5, (s, pl, p) -> s.poses.onPose(pl, p));
 		route(PhonePayloads.CallMute.TYPE, 3, (s, pl, p) -> s.calls.mute(pl.getUUID(), p.id(), p.on()));
+		// scroll.in (1.4): publicar é caro (e tem limite por dia); curtir é barato, mas leva o estado (repetir não muda nada).
+		route(PhonePayloads.FeedGet.TYPE, 1, (s, pl, p) -> s.feed.onGet(pl, p));
+		route(PhonePayloads.FeedEligibleGet.TYPE, 2, (s, pl, p) -> s.feed.onEligibleGet(pl));
+		route(PhonePayloads.FeedPublish.TYPE, 5, (s, pl, p) -> s.feed.onPublish(pl, p));
+		route(PhonePayloads.FeedLike.TYPE, 0.5, (s, pl, p) -> s.feed.onLike(pl, p));
+		route(PhonePayloads.FeedCommentsGet.TYPE, 1, (s, pl, p) -> s.feed.onCommentsGet(pl, p));
+		route(PhonePayloads.FeedComment.TYPE, 2, (s, pl, p) -> s.feed.onComment(pl, p));
+		route(PhonePayloads.FeedCommentDelete.TYPE, 1, (s, pl, p) -> s.feed.onCommentDelete(pl, p));
+		route(PhonePayloads.FeedDelete.TYPE, 2, (s, pl, p) -> s.feed.onDelete(pl, p));
+		route(PhonePayloads.FeedReport.TYPE, 3, (s, pl, p) -> s.feed.onReport(pl, p));
 	}
 
 	private void onSend(PhonePlayer player, PhonePayloads.Send packet) {
@@ -2006,6 +2096,9 @@ public final class PhoneService {
 			return true;
 		}
 		Map<Long, Integer> refs = photoRefs.get(photo.id);
+		if (refs != null && refs.containsKey(FEED_REF) && feed.canViewPhoto(who, photo.id)) {
+			return true;
+		}
 		if (refs != null) {
 			for (long conversationId : refs.keySet()) {
 				Conversation conversation = conversations.get(conversationId);
@@ -2110,6 +2203,8 @@ public final class PhoneService {
 	}
 
 	private void deleteFromGallery(PhotoStore.Photo photo, boolean writeIndex) {
+		// A publicação no scroll.in sai antes (nunca aponta para foto oculta).
+		feed.photoRemoved(photo.id);
 		Map<Long, Integer> refs = photoRefs.get(photo.id);
 		if (refs != null && !refs.isEmpty()) {
 			photos.hide(photo, writeIndex);
@@ -2126,6 +2221,11 @@ public final class PhoneService {
 	 * real. Deve ser chamado na thread do servidor. Retorna o id, ou -1 se foi recusada.
 	 */
 	public static long storePhoto(UUID owner, byte[] jpeg) {
+		return storePhoto(owner, jpeg, false);
+	}
+
+	/** Igual, escolhendo se a foto conta como tirada pela câmera (com o local carimbado, como no envio de verdade). */
+	public static long storePhoto(UUID owner, byte[] jpeg, boolean camera) {
 		PhoneService service = instance;
 		if (service == null || service.locked) {
 			return -1;
@@ -2141,7 +2241,7 @@ public final class PhoneService {
 			service.accountsDirty = true;
 			service.photos.writeFiles(id, PhotoCodec.FORMAT_JPEG, stored.full(), stored.thumb());
 			service.photos.register(id, owner, PhotoCodec.FORMAT_JPEG, stored.full().length, stored.thumb().length, stored.width(), stored.height(), false,
-				null, 0, 0, 0);
+				camera ? "minecraft:overworld" : null, 10, 64, -20);
 			PhonePlayer online = service.server.player(owner);
 			if (online != null) {
 				service.sendGallery(online);
@@ -2321,6 +2421,7 @@ public final class PhoneService {
 		service.accountsDirty = false;
 		service.data = new AccountsFile();
 		service.photos = new PhotoStore(service.dir);
+		service.feed = new FeedService(service);
 		service.load();
 	}
 
@@ -2396,11 +2497,76 @@ public final class PhoneService {
 	// ------------------------------------------------------------------ moderação (comando /handyphone)
 
 	/** Resposta de uma ação de administração: o texto para quem digitou o comando e se deu certo. */
-	public record AdminResult(boolean ok, Msg msg) {
+	public record AdminResult(boolean ok, Msg msg, List<Msg> lines) {
+		public AdminResult(boolean ok, Msg msg) {
+			this(ok, msg, List.of());
+		}
+
 		/** O texto em inglês (testes e logs); quem digita o comando recebe {@link Msg#component()}. */
 		public String message() {
 			return msg.english();
 		}
+	}
+
+	/** {@code /handyphone post remove <id>}: arquiva a prova (a publicação, os comentários, as denúncias e a foto) e tira a publicação. */
+	public static AdminResult adminPostRemove(long id) {
+		PhoneService service = instance;
+		if (service == null) {
+			return OFF;
+		}
+		if (service.locked) {
+			return LOCKED;
+		}
+		Map<String, Object> proof = service.feed.proofOfPost(id);
+		if (proof == null) {
+			return new AdminResult(false, new Msg("handyphone.command.post.not_found", id));
+		}
+		String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+		Path archive = service.dir.resolve("moderacao").resolve(stamp + "-scrollin-" + id);
+		try {
+			Files.createDirectories(archive);
+			write(archive.resolve("publicacao.json"), proof);
+			PhotoStore.Photo photo = service.photos.get(((Number) proof.get("foto")).longValue());
+			if (photo != null) {
+				service.photos.copyTo(photo, archive);
+			}
+		} catch (IOException | RuntimeException e) {
+			HandyPhoneCore.LOGGER.error("HandyPhone: removing scroll.in post {} was CANCELLED: couldn't archive the evidence in {}", id, archive, e);
+			return new AdminResult(false, new Msg("handyphone.command.wipe.failed", archive));
+		}
+		FeedService.Post post = service.feed.post(id);
+		service.feed.removePost(post, true);
+		HandyPhoneCore.LOGGER.info("HandyPhone: scroll.in post {} by {} removed by an admin; evidence in {}", id, proof.get("nome"), archive);
+		return new AdminResult(true, new Msg("handyphone.command.post.removed", id, proof.get("nome"), archive));
+	}
+
+	/** {@code /handyphone reports}: a fila de denúncias (até 15 publicações, a denúncia mais recente primeiro). */
+	public static AdminResult adminReports() {
+		PhoneService service = instance;
+		if (service == null) {
+			return OFF;
+		}
+		List<FeedService.ReportSummary> queue = service.feed.reportQueue();
+		if (queue.isEmpty()) {
+			return new AdminResult(true, new Msg("handyphone.command.reports.none"));
+		}
+		List<Msg> lines = new ArrayList<>();
+		for (FeedService.ReportSummary r : queue.subList(0, Math.min(15, queue.size()))) {
+			String caption = r.caption().length() > 60 ? r.caption().substring(0, 60) + "…" : r.caption();
+			lines.add(new Msg("handyphone.command.reports.line", r.post(), r.owner(), r.count(), caption));
+		}
+		return new AdminResult(true, new Msg("handyphone.command.reports", queue.size()), lines);
+	}
+
+	/** {@code /handyphone reports dismiss <id>}: a publicação fica e as denúncias dela saem da fila. */
+	public static AdminResult adminReportsDismiss(long id) {
+		PhoneService service = instance;
+		if (service == null) {
+			return OFF;
+		}
+		int n = service.feed.dismissReports(id);
+		return n > 0 ? new AdminResult(true, new Msg("handyphone.command.reports.dismissed", n, id))
+			: new AdminResult(false, new Msg("handyphone.command.post.not_found", id));
 	}
 
 	private static final AdminResult OFF = new AdminResult(false, new Msg("handyphone.command.off"));
@@ -2540,6 +2706,7 @@ public final class PhoneService {
 			photoLog.add(Map.of("id", photo.id, "hora", photo.time, "bytes", photo.size, "doComputador", photo.imported, "apagadaPeloDono", photo.hidden));
 		}
 		proof.put("fotos", photoLog);
+		proof.put("scrollIn", feed.proofOf(target));
 		try {
 			Files.createDirectories(archive);
 			write(archive.resolve("wipe.json"), proof);
@@ -2559,6 +2726,7 @@ public final class PhoneService {
 		location.stopShare(target);
 		uploads.remove(target);
 		wipeGeneration.merge(target, 1, Integer::sum);
+		feed.wipe(target);
 		for (Conversation group : groupsToDelete) {
 			deleteConversation(group);
 		}
@@ -2591,6 +2759,8 @@ public final class PhoneService {
 		}
 		PhonePlayer wiped = server.player(target);
 		if (wiped != null) {
+			// O id e o nick do feed saíram no wipe: o celular recebe os novos (senão o próprio perfil abriria vazio).
+			feed.onJoin(wiped);
 			sendGallery(wiped);
 			location.sendPlacesTo(wiped);
 			sync(wiped);
@@ -2931,6 +3101,7 @@ public final class PhoneService {
 		data.nextPhotoId = Math.max(data.nextPhotoId, photos.maxIdOnDisk() + 1);
 
 		loadConversations();
+		feed.load();
 		// Fotos apagadas pelo dono que nenhuma conversa usa mais (por exemplo, a conversa foi apagada com o servidor desligado). Só com
 		// TODAS as conversas lidas: uma conversa ilegível (ou guardada como corrompida, que o dono pode restaurar) ainda pode usar a foto.
 		if (conversationsClean && !locked) {
@@ -3069,6 +3240,7 @@ public final class PhoneService {
 	/** Um arquivo a gravar: o texto já está pronto (serializado na thread do servidor), só falta o disco. */
 	private record WriteJob(Path file, String json, boolean backupFirst, long conversation) {
 		static final long ACCOUNTS = -1;
+		static final long FEED = -2;
 	}
 
 	/** O que uma rodada de gravações não conseguiu fazer: arquivos não gravados e arquivos de conversas apagadas que ficaram. */
@@ -3156,6 +3328,10 @@ public final class PhoneService {
 				}
 				it.remove();
 			}
+			String feedJson = feed.takeJson();
+			if (feedJson != null) {
+				jobs.add(new WriteJob(feed.file(), feedJson, false, WriteJob.FEED));
+			}
 			// Conversas apagadas: o arquivo só sai agora, com os índices já gravados.
 			deletedConversations.clear();
 		} catch (RuntimeException e) {
@@ -3217,6 +3393,8 @@ public final class PhoneService {
 		for (WriteJob job : failures.writes()) {
 			if (job.conversation() == WriteJob.ACCOUNTS) {
 				accountsDirty = true;
+			} else if (job.conversation() == WriteJob.FEED) {
+				feed.dirty = true;
 			} else if (conversations.containsKey(job.conversation())) {
 				dirtyConversations.add(job.conversation());
 			}

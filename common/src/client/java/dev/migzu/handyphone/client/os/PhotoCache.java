@@ -53,6 +53,11 @@ public final class PhotoCache {
 		return get(full, id, false, backend, now);
 	}
 
+	/** A foto inteira se já está no cache (sem pedir). */
+	BufferedImage peekFull(long id) {
+		return full.get(id);
+	}
+
 	/** Só olha o cache, sem pedir nada ao servidor. */
 	BufferedImage peekThumb(long id) {
 		return thumbs.get(id);

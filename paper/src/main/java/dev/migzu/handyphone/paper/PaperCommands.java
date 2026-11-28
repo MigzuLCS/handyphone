@@ -1,6 +1,7 @@
 package dev.migzu.handyphone.paper;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -59,8 +60,17 @@ final class PaperCommands {
 				.then(Commands.literal("info")
 					.then(Commands.argument("player", StringArgumentType.word())
 						.suggests((ctx, builder) -> suggestPlayers(builder))
-						.executes(ctx -> run(ctx, PhoneService::adminInfo))));
-			commands.register(root.build(), "HandyPhone moderation: mute, unmute, wipe and info on a player's phone");
+						.executes(ctx -> run(ctx, PhoneService::adminInfo))))
+				.then(Commands.literal("post")
+					.then(Commands.literal("remove")
+						.then(Commands.argument("id", LongArgumentType.longArg(1))
+							.executes(ctx -> show(ctx, PhoneService.adminPostRemove(LongArgumentType.getLong(ctx, "id")))))))
+				.then(Commands.literal("reports")
+					.executes(ctx -> show(ctx, PhoneService.adminReports()))
+					.then(Commands.literal("dismiss")
+						.then(Commands.argument("id", LongArgumentType.longArg(1))
+							.executes(ctx -> show(ctx, PhoneService.adminReportsDismiss(LongArgumentType.getLong(ctx, "id")))))));
+			commands.register(root.build(), "HandyPhone moderation: mute, unmute, wipe and info on a player's phone; scroll.in post removal and reports");
 		});
 	}
 
@@ -80,6 +90,33 @@ final class PaperCommands {
 
 	private interface Action {
 		PhoneService.AdminResult apply(UUID target);
+	}
+
+	/** Resultado de um comando do scroll.in (sem jogador): a linha principal e, na fila de denúncias, uma linha por publicação. */
+	private static int show(CommandContext<CommandSourceStack> ctx, PhoneService.AdminResult result) {
+		CommandSender sender = ctx.getSource().getSender();
+		Component text = PaperText.component(new Msg("handyphone.command.result", HandyPhoneCore.DISPLAY_NAME, "scroll.in", result.msg()));
+		if (!result.ok()) {
+			sender.sendMessage(text.color(NamedTextColor.RED));
+			return 0;
+		}
+		sender.sendMessage(text);
+		for (Msg line : result.lines()) {
+			sender.sendMessage(PaperText.component(line).color(NamedTextColor.GRAY));
+		}
+		if (result.msg().key().equals("handyphone.command.post.removed")) {
+			Component echo = Component.text("[").append(sender.name()).append(Component.text(": ")).append(text).append(Component.text("]"))
+				.color(NamedTextColor.GRAY).decorate(TextDecoration.ITALIC);
+			for (Player admin : Bukkit.getOnlinePlayers()) {
+				if (admin != sender && admin.hasPermission(PERMISSION)) {
+					admin.sendMessage(echo);
+				}
+			}
+			if (sender != Bukkit.getConsoleSender()) {
+				Bukkit.getConsoleSender().sendMessage(echo);
+			}
+		}
+		return 1;
 	}
 
 	/** O jogador pelo nome: quem está ligado, senão o perfil que o servidor já conhece (sem consulta de rede). */

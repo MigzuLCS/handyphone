@@ -25,6 +25,17 @@ abstract class Theme {
 		return slot;
 	}
 
+	/** Quantos apps ficam na grade (fora do dock): 4, ou 5 com o scroll.in. */
+	static int gridCount(PhoneOS os) {
+		int n = 0;
+		for (PhoneOS.App app : os.apps) {
+			if (!app.dock()) {
+				n++;
+			}
+		}
+		return n;
+	}
+
 	/** Identificador estável, usado para salvar a escolha do jogador. */
 	abstract String id();
 

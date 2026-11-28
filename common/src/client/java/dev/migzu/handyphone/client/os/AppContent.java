@@ -202,6 +202,11 @@ abstract class AppContent {
 		}
 	}
 
+	/** Esquece as áreas já registradas neste desenho (uma folha por cima do app: só os botões dela valem, também para o destaque). */
+	protected final void clearHits() {
+		hits.clear();
+	}
+
 	/** Registra uma área clicável de item; retorna true se ela está pressionada agora. */
 	protected final boolean hit(String key, float x, float y, float w, float h, Runnable action) {
 		return hit(key, x, y, w, h, PhoneSound.LIST_ITEM, action);

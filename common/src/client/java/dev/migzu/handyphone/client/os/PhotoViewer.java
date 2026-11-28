@@ -157,7 +157,7 @@ final class PhotoViewer {
 		button(g, "viewer-save", Lang.t("handyphone.gallery.action.save"), bx, by, bw, 22, new Color(0x5B6170), () -> os.exportPhotos(java.util.List.of(id)));
 		button(g, "viewer-delete", Lang.t("handyphone.photo.viewer.delete"), bx + bw + 6, by, bw, 22, new Color(0x7B7F8C), () ->
 			os.confirm(Lang.plural("handyphone.gallery.delete.title", 1),
-				Lang.t(os.localOnly() ? "handyphone.gallery.delete.message_local" : "handyphone.gallery.delete.message"),
+				Lang.t(os.localOnly() ? "handyphone.gallery.delete.message_local" : os.data.feedAvailable ? "handyphone.gallery.delete.message_feed" : "handyphone.gallery.delete.message"),
 				Lang.t("handyphone.gallery.action.delete"), true, () -> {
 					os.deletePhoto(id);
 					onDelete.run();

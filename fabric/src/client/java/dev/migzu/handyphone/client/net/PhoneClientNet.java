@@ -215,6 +215,51 @@ public final class PhoneClientNet implements PhoneBackend {
 			}
 		});
 
+		// scroll.in (1.4). Servidor antigo nunca manda o FeedInfo: o ícone nem aparece.
+		FabricClientNet.receive(PhonePayloads.FeedInfo.TYPE, (packet, ctx) -> {
+			synchronized (os) {
+				os.applyFeedInfo(packet.available(), packet.cameraOnly(), packet.maxCaption(), packet.maxComment(), packet.me(), packet.meName(), packet.admin());
+			}
+		});
+		FabricClientNet.receive(PhonePayloads.FeedPage.TYPE, (packet, ctx) -> {
+			java.util.List<PhoneData.FeedPost> posts = new java.util.ArrayList<>();
+			for (PhonePayloads.FeedPostEntry e : packet.posts()) {
+				posts.add(feedPost(e));
+			}
+			synchronized (os) {
+				os.applyFeedPage(packet.author(), packet.before(), posts, packet.more());
+			}
+		});
+		FabricClientNet.receive(PhonePayloads.FeedPost.TYPE, (packet, ctx) -> {
+			synchronized (os) {
+				os.applyFeedPost(feedPost(packet.entry()));
+			}
+		});
+		FabricClientNet.receive(PhonePayloads.FeedGone.TYPE, (packet, ctx) -> {
+			synchronized (os) {
+				os.applyFeedGone(packet.id());
+			}
+		});
+		FabricClientNet.receive(PhonePayloads.FeedComments.TYPE, (packet, ctx) -> {
+			java.util.List<PhoneData.FeedComment> list = new java.util.ArrayList<>();
+			for (PhonePayloads.FeedCommentEntry c : packet.comments()) {
+				list.add(new PhoneData.FeedComment(c.id(), c.author(), c.name(), c.time(), c.text(), c.mine()));
+			}
+			synchronized (os) {
+				os.applyFeedComments(packet.post(), list);
+			}
+		});
+		FabricClientNet.receive(PhonePayloads.FeedEligible.TYPE, (packet, ctx) -> {
+			synchronized (os) {
+				os.applyFeedEligible(packet.ids());
+			}
+		});
+		FabricClientNet.receive(PhonePayloads.FeedActivity.TYPE, (packet, ctx) -> {
+			synchronized (os) {
+				os.applyFeedActivity(packet.kind(), packet.name(), packet.post());
+			}
+		});
+
 		FabricClientNet.receive(PhonePayloads.MapInfo.TYPE, (packet, ctx) -> {
 			synchronized (os) {
 				os.applyMapInfo(
@@ -584,6 +629,62 @@ public final class PhoneClientNet implements PhoneBackend {
 			}
 		});
 		return true;
+	}
+
+	private static PhoneData.FeedPost feedPost(PhonePayloads.FeedPostEntry e) {
+		return new PhoneData.FeedPost(e.id(), e.author(), e.name(), e.time(), e.caption(), e.photo(), e.likes(), e.liked(), e.comments(), e.mine());
+	}
+
+	/** Manda um pedido do scroll.in só se o servidor conhece o canal (servidor antigo: nada). */
+	private static void sendFeed(PhonePayloads.Payload payload) {
+		if (FabricClientNet.canSend(payload.type())) {
+			send(payload);
+		}
+	}
+
+	@Override
+	public void feedGet(String author, long before) {
+		sendFeed(new PhonePayloads.FeedGet(author, before));
+	}
+
+	@Override
+	public void feedEligible() {
+		sendFeed(new PhonePayloads.FeedEligibleGet());
+	}
+
+	@Override
+	public void feedPublish(long photo, String caption) {
+		sendFeed(new PhonePayloads.FeedPublish(photo, caption));
+	}
+
+	@Override
+	public void feedLike(long post, boolean on) {
+		sendFeed(new PhonePayloads.FeedLike(post, on));
+	}
+
+	@Override
+	public void feedComments(long post) {
+		sendFeed(new PhonePayloads.FeedCommentsGet(post));
+	}
+
+	@Override
+	public void feedComment(long post, String text) {
+		sendFeed(new PhonePayloads.FeedComment(post, text));
+	}
+
+	@Override
+	public void feedCommentDelete(long post, long comment) {
+		sendFeed(new PhonePayloads.FeedCommentDelete(post, comment));
+	}
+
+	@Override
+	public void feedDelete(long post) {
+		sendFeed(new PhonePayloads.FeedDelete(post));
+	}
+
+	@Override
+	public void feedReport(long post) {
+		sendFeed(new PhonePayloads.FeedReport(post));
 	}
 
 	@Override

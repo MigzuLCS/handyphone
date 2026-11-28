@@ -62,20 +62,30 @@ public final class PhoneOS {
 		}
 	}
 
-	final List<App> apps = List.of(
+	/** Todos os apps, na ordem da tela inicial; o scroll.in só aparece quando o servidor diz que ele existe ({@link #applyFeedInfo}). */
+	private static final List<App> ALL_APPS = List.of(
 		new App("map", "handyphone.app.map", new Color(0x4FC3F7), new Color(0x1976D2), false),
 		new App("contacts", "handyphone.app.contacts", new Color(0xFFB74D), new Color(0xF4511E), false),
 		new App("settings", "handyphone.app.settings", new Color(0xB0BEC5), new Color(0x546E7A), false),
 		new App("about", "handyphone.app.about", new Color(0xB388FF), new Color(0x5E35B1), false),
+		new App("feed", "handyphone.app.feed", new Color(0xFF7B72), new Color(0xD32F2F), false),
 		new App("phone", "handyphone.app.phone", new Color(0x69F0AE), new Color(0x00A152), true),
 		new App("messages", "handyphone.app.messages", new Color(0x7CF07A), new Color(0x1FAF38), true),
 		new App("camera", "handyphone.app.camera", new Color(0xE0E0E0), new Color(0x8E8E93), true),
 		new App("gallery", "handyphone.app.gallery", new Color(0xFF8A80), new Color(0xD81B60), true)
 	);
 
+	/** Os apps à vista na tela inicial (o índice de {@link #openApp} é nesta lista). Só muda por {@link #updateApps}. */
+	List<App> apps = visibleApps(false);
+
+	private static List<App> visibleApps(boolean feed) {
+		return ALL_APPS.stream().filter(a -> feed || !a.id().equals("feed")).toList();
+	}
+
 	private final MessagesApp messages = new MessagesApp();
 	private final ContactsApp contacts = new ContactsApp();
 	private final GalleryApp gallery = new GalleryApp();
+	private final FeedApp feed = new FeedApp();
 	private final MapApp map = new MapApp();
 	private final PhoneApp phone = new PhoneApp();
 	/** A tela da ligação (sobre tudo, menos o aviso) e a barra verde de quando ela está minimizada. */
@@ -85,7 +95,7 @@ public final class PhoneOS {
 	/** Apps que já têm conteúdo de verdade; os outros mostram "Em breve". */
 	private final Map<String, AppContent> contents = Map.of(
 		"settings", new SettingsApp(), "messages", messages, "contacts", contacts, "camera", new CameraApp(), "gallery", gallery, "map", map,
-		"phone", phone, "about", new AboutApp()
+		"phone", phone, "about", new AboutApp(), "feed", feed
 	);
 
 	/** Reduzir e comprimir imagem custa CPU: nunca na thread de desenho nem na do jogo. */
@@ -160,7 +170,7 @@ public final class PhoneOS {
 	final Spring unlock = Spring.smooth(0);
 	/** 0 = tela inicial, 1 = app aberto. */
 	final Spring appOpen = new Spring(0, 300, 27);
-	final Spring[] press = new Spring[apps.size()];
+	final Spring[] press = new Spring[ALL_APPS.size()];
 	/** Instantâneo para o HUD do jogo (lido sem trava). */
 	private volatile PhoneData.HudView hud = PhoneData.HudView.NONE;
 	/** Instantâneo da ligação para o áudio e o HUD (lido sem trava). */
@@ -713,6 +723,7 @@ public final class PhoneOS {
 		// Os ids de foto são de cada servidor: as informações de um não podem aparecer em outro.
 		data.photoInfo.clear();
 		infoAsked.clear();
+		clearFeed();
 		dirty = true;
 	}
 
@@ -2602,6 +2613,162 @@ public final class PhoneOS {
 		dirty = true;
 	}
 
+	// ------------------------------------------------------------------ scroll.in (1.4)
+
+	/** Troca os apps à vista (o scroll.in some e aparece); o app aberto continua aberto, ou fecha se sumiu. */
+	private void updateApps(boolean feedVisible) {
+		List<App> next = visibleApps(feedVisible);
+		if (next.equals(apps)) {
+			return;
+		}
+		String open = openApp >= 0 ? apps.get(openApp).id() : null;
+		apps = next;
+		openApp = -1;
+		if (open != null) {
+			for (int i = 0; i < apps.size(); i++) {
+				if (apps.get(i).id().equals(open)) {
+					openApp = i;
+				}
+			}
+			if (openApp < 0) {
+				appOpen.snap(0);
+				modal = null;
+			}
+		}
+		homeFocus = null;
+		pressedIcon = -1;
+		dirty = true;
+	}
+
+	/** Aviso do scroll.in sem erro (denúncia enviada). */
+	void feedNotice(String text) {
+		showBanner(Lang.t("handyphone.app.feed"), text, -1, "feed");
+		playSound(PhoneSound.CONTACT_SAVED);
+	}
+
+	/** O ícone desse app está na tela inicial? (testes: o scroll.in só aparece com servidor que o tem) */
+	public boolean appVisible(String id) {
+		return apps.stream().anyMatch(a -> a.id().equals(id));
+	}
+
+	/** Ids das publicações do feed já baixadas, do mais novo ao mais antigo (testes). */
+	public List<Long> feedPostIds() {
+		return data.feed.posts.stream().map(PhoneData.FeedPost::id).toList();
+	}
+
+	private void clearFeed() {
+		data.feedInfoReceived = false;
+		data.feedAvailable = false;
+		data.feedMe = "";
+		data.feedMeName = "";
+		data.feedAdmin = false;
+		data.feedEligible = null;
+		data.feed.clear();
+		data.profile.clear();
+		data.profile.author = "";
+		data.feedComments.clear();
+		updateApps(false);
+	}
+
+	/** O servidor diz se o scroll.in existe aqui (sem isto o ícone nem aparece), os limites e quem é o próprio jogador no feed. */
+	public void applyFeedInfo(boolean available, boolean cameraOnly, int maxCaption, int maxComment, String me, String meName, boolean admin) {
+		data.feedAdmin = available && admin;
+		data.feedInfoReceived = true;
+		data.feedAvailable = available;
+		data.feedCameraOnly = cameraOnly;
+		data.feedMaxCaption = Math.max(1, maxCaption);
+		data.feedMaxComment = Math.max(1, maxComment);
+		data.feedMe = me;
+		data.feedMeName = meName;
+		if (!available) {
+			data.feed.clear();
+			data.profile.clear();
+			data.feedComments.clear();
+		}
+		updateApps(available);
+		dirty = true;
+	}
+
+	/**
+	 * Uma página do feed ({@code author} vazio = de todos) ou de um perfil. {@code before} 0 = a primeira página (troca a lista);
+	 * senão continua depois da publicação {@code before}.
+	 */
+	public void applyFeedPage(String author, long before, List<PhoneData.FeedPost> posts, boolean more) {
+		PhoneData.FeedList list;
+		if (author.isEmpty()) {
+			list = data.feed;
+		} else if (author.equals(data.profile.author)) {
+			list = data.profile;
+		} else {
+			return;
+		}
+		if (before == 0) {
+			list.posts.clear();
+		} else if (list.posts.isEmpty() || list.posts.get(list.posts.size() - 1).id() != before) {
+			list.loading = false;
+			return; // Resposta de um pedido antigo (a lista já mudou): descarta.
+		}
+		for (PhoneData.FeedPost p : posts) {
+			if (list.posts.size() >= PhoneData.MAX_FEED_POSTS) {
+				break;
+			}
+			if (list.find(p.id()) == null) {
+				list.posts.add(p);
+			}
+		}
+		list.more = more && list.posts.size() < PhoneData.MAX_FEED_POSTS;
+		list.loaded = true;
+		list.loading = false;
+		dirty = true;
+	}
+
+	/** Uma publicação mudou (curtida, comentário, legenda): troca onde estiver. */
+	public void applyFeedPost(PhoneData.FeedPost post) {
+		data.feed.replace(post);
+		data.profile.replace(post);
+		dirty = true;
+	}
+
+	/** Uma publicação saiu (apagada pelo dono, por um administrador, ou a foto saiu). */
+	public void applyFeedGone(long post) {
+		data.feed.posts.removeIf(p -> p.id() == post);
+		data.profile.posts.removeIf(p -> p.id() == post);
+		data.feedComments.remove(post);
+		dirty = true;
+	}
+
+	/** Os comentários de uma publicação (todos os que o jogador pode ver, do mais antigo ao mais novo). */
+	public void applyFeedComments(long post, List<PhoneData.FeedComment> comments) {
+		if (data.feedComments.size() > 64) {
+			data.feedComments.clear();
+		}
+		data.feedComments.put(post, new ArrayList<>(comments));
+		dirty = true;
+	}
+
+	/** As fotos da galeria que podem ser publicadas. */
+	public void applyFeedEligible(List<Long> ids) {
+		data.feedEligible = new java.util.HashSet<>(ids);
+		dirty = true;
+	}
+
+	/** Tipos de atividade do scroll.in que viram aviso. */
+	public static final int FEED_LIKE = 0, FEED_COMMENT = 1, FEED_REPORT = 2;
+
+	/** Alguém curtiu ou comentou uma publicação do jogador: aviso discreto (respeita o "aviso no topo" dos Ajustes). */
+	public void applyFeedActivity(int kind, String name, long post) {
+		if (kind == FEED_REPORT) {
+			// Para administradores: aviso do servidor, não notificação social (aparece mesmo com o aviso no topo desligado).
+			showBanner(Lang.t("handyphone.app.feed"), Lang.t("handyphone.feed.activity.report"), -1, "feed");
+			playSound(PhoneSound.NOTIFICATION);
+			return;
+		}
+		String text = Lang.t(kind == FEED_COMMENT ? "handyphone.feed.activity.comment" : "handyphone.feed.activity.like", name);
+		notificationBanner(Lang.t("handyphone.app.feed"), text, "feed");
+		playSound(PhoneSound.NOTIFICATION);
+		dirty = true;
+	}
+
 	// ------------------------------------------------------------------ ligações
 
 	/** O servidor diz se as ligações existem aqui. */
@@ -2988,12 +3155,14 @@ public final class PhoneOS {
 		g.fill(new RoundRectangle2D.Float(r[0], y + 1.6f, r[2], r[3], 12, 12));
 		g.setColor(new Color(0x23252C));
 		g.fill(new RoundRectangle2D.Float(r[0], y, r[2], r[3], 12, 12));
-		g.setColor(new Color(0x35C759));
+		// O scroll.in usa a cor do ícone dele; o resto, o verde de sempre.
+		Color dot = "feed".equals(bannerGlyph) ? new Color(0xD32F2F) : new Color(0x35C759);
+		g.setColor(dot);
 		g.fill(new Ellipse2D.Float(r[0] + 7, y + 8, 18, 18));
 		java.awt.geom.AffineTransform t = g.getTransform();
 		g.translate(r[0] + 9, y + 10);
 		g.scale(14 / 34f, 14 / 34f);
-		Ui.glyph(g, bannerGlyph, Color.WHITE, Color.WHITE);
+		Ui.glyph(g, bannerGlyph, Color.WHITE, "feed".equals(bannerGlyph) ? dot : Color.WHITE);
 		g.setTransform(t);
 		g.setColor(Color.WHITE);
 		g.setFont(Ui.font(Font.BOLD, 8.4f));

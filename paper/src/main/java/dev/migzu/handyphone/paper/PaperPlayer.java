@@ -102,4 +102,9 @@ final class PaperPlayer implements PhonePlayer {
 	public boolean isSpectator() {
 		return handle.getGameMode() == GameMode.SPECTATOR;
 	}
+
+	@Override
+	public boolean isAdmin() {
+		return handle.hasPermission(PaperCommands.PERMISSION);
+	}
 }

@@ -42,7 +42,7 @@ final class FlatTheme extends Theme {
 	private static final int COLS = 4;
 	private static final float ICON = 33f;
 	private static final float DOCK_Y = SY + SH - 56f;
-	private static final float GRID_Y = DOCK_Y - 78f;
+	private static final float GRID_Y = DOCK_Y - 78f, GRID_ROW = 66f;
 	private static final float HEADER_H = 30f;
 	// Botão físico de início: só um contorno fino na moldura de baixo.
 	private static final float KEY_CX = FACE_W / 2f, KEY_CY = 389f, KEY_W = 38f, KEY_H = 10f;
@@ -84,7 +84,12 @@ final class FlatTheme extends Theme {
 	private static float[] iconRect(PhoneOS os, int i) {
 		float gap = (SW - COLS * ICON) / (COLS + 1);
 		float x = SX + gap + slot(os, i) % COLS * (ICON + gap);
-		return new float[] {x, os.apps.get(i).dock() ? DOCK_Y : GRID_Y};
+		if (os.apps.get(i).dock()) {
+			return new float[] {x, DOCK_Y};
+		}
+		// Mais de uma linha (o scroll.in é o 5º): a grade sobe, e a última linha fica onde a única ficava.
+		int rows = (gridCount(os) + COLS - 1) / COLS;
+		return new float[] {x, GRID_Y - (rows - 1 - slot(os, i) / COLS) * GRID_ROW};
 	}
 
 	@Override

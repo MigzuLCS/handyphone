@@ -80,4 +80,9 @@ final class FabricPlayer implements PhonePlayer {
 	public boolean isSpectator() {
 		return handle.isSpectator();
 	}
+
+	@Override
+	public boolean isAdmin() {
+		return dev.migzu.handyphone.server.PhoneCommands.isAdmin(handle);
+	}
 }
